@@ -99,6 +99,9 @@ export function App() {
   const [aiOpen, setAiOpen] = useState(false)
   // 左侧文稿栏可收起：听课时把宽度让给讲稿。
   const [libraryOpen, setLibraryOpen] = useState(true)
+  // 删除文稿是破坏性操作：先点「×」展开确认条，再点「确认删除」才真的删。
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [aiStatus, setAiStatus] = useState<AiConfigView | null>(null)
   const [aiForm, setAiForm] = useState<{ baseUrl: string; model: string; visionModel: string; apiKey: string }>({ baseUrl: DEFAULT_AI.baseUrl, model: DEFAULT_AI.model, visionModel: '', apiKey: '' })
   const [aiMessage, setAiMessage] = useState<Notice | null>(null)
@@ -250,6 +253,36 @@ export function App() {
     await refreshList()
     if (last) await openVersion(last)
     setBusy(false)
+  }
+
+  async function deleteDocument(item: DocumentListItem) {
+    if (!window.desk || deleting) return
+    setDeleting(true)
+    const result = await window.desk.documents.delete({ documentVersionId: item.documentVersionId })
+    setDeleting(false)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    if (selected === item.documentVersionId) {
+      // 先让自动读懂循环失效，再清空详情，避免它继续往已删的文稿上写。
+      autoToken.current += 1
+      activeVersion.current = null
+      autoRunning.current = null
+      setSelected(null)
+      setDetail(null)
+      setPages([])
+      setPageIndex(0)
+      setPageBlocks([])
+      setUnpaged([])
+      setReadings([])
+      setResearch([])
+      setFocus(null)
+      setAutoStatuses({})
+    }
+    setConfirmDeleteId(null)
+    await refreshList()
+    setNotice({ tone: 'info', text: `《${item.displayName}》已删除。` })
   }
 
   async function openAi() {
@@ -500,10 +533,32 @@ export function App() {
                 {booting ? <p className="empty">正在读取本机文库…</p> : null}
                 {!booting && docs.length === 0 ? <p className="empty">还没有文稿。可以选择 PPTX、DOCX、PDF、TXT、Markdown 或图片。文件只留在这台电脑上。</p> : null}
                 {docs.map((item) => (
-                  <button key={item.documentVersionId} className={`doc ${selected === item.documentVersionId ? 'active' : ''}`} onClick={() => void openVersion(item.documentVersionId)}>
-                    <b>{item.displayName}</b>
-                    <small>{FORMAT_LABEL[item.format] ?? item.format} · {STATE_LABEL[item.job?.state ?? item.status] ?? item.status}</small>
-                  </button>
+                  <div key={item.documentVersionId} className={`doc-item ${selected === item.documentVersionId ? 'active' : ''}`}>
+                    <button className={`doc ${selected === item.documentVersionId ? 'active' : ''}`} onClick={() => void openVersion(item.documentVersionId)}>
+                      <b>{item.displayName}</b>
+                      <small>{FORMAT_LABEL[item.format] ?? item.format} · {STATE_LABEL[item.job?.state ?? item.status] ?? item.status}</small>
+                    </button>
+                    <button
+                      className={`doc-del ${confirmDeleteId === item.documentVersionId ? 'open' : ''}`}
+                      title="删除这份文稿"
+                      aria-label={`删除 ${item.displayName}`}
+                      onClick={() => setConfirmDeleteId((current) => (current === item.documentVersionId ? null : item.documentVersionId))}
+                      disabled={deleting}
+                    >
+                      ×
+                    </button>
+                    {confirmDeleteId === item.documentVersionId ? (
+                      <div className="doc-confirm">
+                        <p>删除后，它的页面、讲解课、卡片和错题都会一起删掉，不能恢复。</p>
+                        <div className="doc-confirm-actions">
+                          <button className="danger" onClick={() => void deleteDocument(item)} disabled={deleting}>
+                            {deleting ? '正在删除…' : '确认删除'}
+                          </button>
+                          <button className="ghost" onClick={() => setConfirmDeleteId(null)} disabled={deleting}>取消</button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 ))}
                 {total > docs.length ? <p className="empty">还有 {total - docs.length} 份未显示。当前列表读取前 50 份。</p> : null}
               </div>

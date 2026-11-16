@@ -21,6 +21,8 @@ const desk = {
       invoke<import('../shared/contract').BlockList>(IpcChannel.documentsBlocks, body),
     openSource: (locator: import('../shared/contract').Locator) =>
       invoke<import('../shared/contract').OpenSourceResult>(IpcChannel.documentsOpenSource, locator),
+    delete: (body: { documentVersionId: string }) =>
+      invoke<import('../shared/contract').DeleteDocumentResult>(IpcChannel.documentsDelete, body),
   },
   jobs: {
     get: (body: { jobId: string }) => invoke<import('../shared/contract').JobSnapshot>(IpcChannel.jobsGet, body),

@@ -45,6 +45,7 @@ export function registerIpc(
   bind(IpcChannel.documentsPages, (_event, body) => service.pages(body))
   bind(IpcChannel.documentsBlocks, (_event, body) => service.blocks(body))
   bind(IpcChannel.documentsOpenSource, (event, body) => service.openSource(windowIdFrom(event), body))
+  bind(IpcChannel.documentsDelete, (_event, body) => service.delete(body))
   bind(IpcChannel.jobsGet, (_event, body) => service.job(body))
   bind(IpcChannel.jobsCancel, (_event, body) => service.cancel(body))
   bind(IpcChannel.jobsRetry, (_event, body) => service.retry(body))

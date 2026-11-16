@@ -555,6 +555,47 @@ export class Store {
     this.db.run('DELETE FROM pages WHERE document_version_id = ?', versionId)
   }
 
+  listVersions(documentId: string): VersionRow[] {
+    return this.db.all<VersionRow>(
+      'SELECT * FROM document_versions WHERE document_id = ? ORDER BY created_at ASC',
+      documentId,
+    )
+  }
+
+  listJobIds(versionId: string): string[] {
+    return this.db
+      .all<{ id: string }>('SELECT id FROM jobs WHERE document_version_id = ?', versionId)
+      .map((row) => row.id)
+  }
+
+  /** 删整份文稿：按外键顺序清掉派生数据，最后删版本与文稿本身，返回删掉的版本数。 */
+  deleteDocument(documentId: string): number {
+    const versions = this.listVersions(documentId)
+    this.db.transaction(() => {
+      for (const version of versions) {
+        const versionId = version.id
+        // jobs.retry_of 是指向 jobs 自己的外键：先摘掉再删，否则删父任务会撞约束。
+        this.db.run('UPDATE jobs SET retry_of = NULL WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM jobs WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM issues WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM block_readings WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM blocks WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM image_readings WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM page_research WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM artifacts WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM pages WHERE document_version_id = ?', versionId)
+        // 课程（及讲次/卡片/错题）与学习会话都有 CASCADE，删父行即可。
+        this.db.run('DELETE FROM lectures WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM study_sessions WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM material_digests WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM ai_usage WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM document_versions WHERE id = ?', versionId)
+      }
+      this.db.run('DELETE FROM documents WHERE id = ?', documentId)
+    })
+    return versions.length
+  }
+
   interruptInflight(now: string): JobRow[] {
     return this.db.transaction(() => {
       const rows = this.db.all<JobRow>(`SELECT * FROM jobs WHERE state IN ('queued', 'running')`)

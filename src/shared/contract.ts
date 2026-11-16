@@ -82,6 +82,9 @@ export type DocumentListItem = {
 
 export type DocumentList = { items: DocumentListItem[]; total: number }
 
+/** 删除整份文稿后回给界面的凭据：documentId 用于确认删对了对象，removedVersions 是连带删掉的版本数。 */
+export type DeleteDocumentResult = { documentId: string; removedVersions: number }
+
 export type IssueView = {
   id: string
   code: string

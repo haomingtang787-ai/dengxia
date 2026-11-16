@@ -11,6 +11,7 @@ import {
   ok,
   type BlockList,
   type BlockView,
+  type DeleteDocumentResult,
   type DocumentDetail,
   type DocumentList,
   type ImportResult,
@@ -207,6 +208,46 @@ export class DocumentService {
         })),
         sourceMetadata: this.readMetadata(version.id),
       })
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  async delete(body: unknown): Promise<Result<DeleteDocumentResult>> {
+    const requestId = randomUUID()
+    try {
+      const parsed = parseVersionBody(body)
+      const version = this.store.getVersion(parsed.documentVersionId)
+      if (!version) return fail(requestId, 'NOT_FOUND', '没有这份文稿。')
+      const document = this.store.getDocument(version.document_id)
+      if (!document) return fail(requestId, 'NOT_FOUND', '没有这份文稿。')
+      const versions = this.store.listVersions(document.id)
+      const versionIds = new Set(versions.map((item) => item.id))
+      // 正在解析的文稿先停机：等 worker 真正退出再删，免得删文件时还有人往里写。
+      const running: WorkerHandle[] = []
+      for (const [jobId, handle] of this.live) {
+        const job = this.store.getJob(jobId)
+        if (job && versionIds.has(job.document_version_id)) running.push(handle)
+      }
+      if (running.length) {
+        for (const handle of running) handle.kill()
+        await Promise.all(running.map((handle) => handle.exited.catch(() => undefined)))
+      }
+      const jobIds = versions.flatMap((item) => this.store.listJobIds(item.id))
+      const removed = this.store.deleteDocument(document.id)
+      for (const jobId of this.cancelRequested) {
+        if (!this.store.getJob(jobId)) this.cancelRequested.delete(jobId)
+      }
+      // 库删成功后再清文件：宁可留孤儿字节，也不让记录指向不存在的文件。
+      for (const rel of [`originals/${document.id}`, `artifacts/${document.id}`]) {
+        const target = resolveInside(this.root, rel)
+        if (target && isInsideRoot(this.root, target)) fs.rmSync(target, { recursive: true, force: true })
+      }
+      for (const jobId of jobIds) {
+        const workDir = resolveInside(this.root, `work/${jobId}`)
+        if (workDir && isInsideRoot(this.root, workDir)) fs.rmSync(workDir, { recursive: true, force: true })
+      }
+      return ok(requestId, { documentId: document.id, removedVersions: removed })
     } catch (error) {
       return this.asFailure(requestId, error)
     }
