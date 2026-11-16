@@ -97,6 +97,8 @@ export function App() {
   })
   const showNotice = useCallback((tone: 'info' | 'bad', text: string) => setNotice({ tone, text }), [])
   const [aiOpen, setAiOpen] = useState(false)
+  // 左侧文稿栏可收起：听课时把宽度让给讲稿。
+  const [libraryOpen, setLibraryOpen] = useState(true)
   const [aiStatus, setAiStatus] = useState<AiConfigView | null>(null)
   const [aiForm, setAiForm] = useState<{ baseUrl: string; model: string; visionModel: string; apiKey: string }>({ baseUrl: DEFAULT_AI.baseUrl, model: DEFAULT_AI.model, visionModel: '', apiKey: '' })
   const [aiMessage, setAiMessage] = useState<Notice | null>(null)
@@ -483,23 +485,34 @@ export function App() {
         </div>
       </header>
       {notice ? <div className={`banner ${notice.tone === 'bad' ? 'bad' : 'info'}`} style={{ margin: '0 20px 12px' }}>{notice.text}</div> : null}
-      <div className={`shell ${view === 'doc' ? '' : 'two'}`}>
-        <aside className="panel library">
-          <header>
-            <h2>文稿</h2>
-            <button className="primary" onClick={() => void importFiles()} disabled={busy}>导入</button>
-          </header>
-          <div className="doc-list">
-            {booting ? <p className="empty">正在读取本机文库…</p> : null}
-            {!booting && docs.length === 0 ? <p className="empty">还没有文稿。可以选择 PPTX、DOCX、PDF、TXT、Markdown 或图片。文件只留在这台电脑上。</p> : null}
-            {docs.map((item) => (
-              <button key={item.documentVersionId} className={`doc ${selected === item.documentVersionId ? 'active' : ''}`} onClick={() => void openVersion(item.documentVersionId)}>
-                <b>{item.displayName}</b>
-                <small>{FORMAT_LABEL[item.format] ?? item.format} · {STATE_LABEL[item.job?.state ?? item.status] ?? item.status}</small>
-              </button>
-            ))}
-            {total > docs.length ? <p className="empty">还有 {total - docs.length} 份未显示。当前列表读取前 50 份。</p> : null}
-          </div>
+      <div className={`shell ${view === 'doc' ? '' : 'two'}${libraryOpen ? '' : ' library-collapsed'}`}>
+        <aside className={`panel library${libraryOpen ? '' : ' collapsed'}`}>
+          {libraryOpen ? (
+            <>
+              <header>
+                <h2>文稿</h2>
+                <div className="row" style={{ gap: 6 }}>
+                  <button className="primary" onClick={() => void importFiles()} disabled={busy}>导入</button>
+                  <button className="icon-btn" title="收起文稿栏" onClick={() => setLibraryOpen(false)}>‹</button>
+                </div>
+              </header>
+              <div className="doc-list">
+                {booting ? <p className="empty">正在读取本机文库…</p> : null}
+                {!booting && docs.length === 0 ? <p className="empty">还没有文稿。可以选择 PPTX、DOCX、PDF、TXT、Markdown 或图片。文件只留在这台电脑上。</p> : null}
+                {docs.map((item) => (
+                  <button key={item.documentVersionId} className={`doc ${selected === item.documentVersionId ? 'active' : ''}`} onClick={() => void openVersion(item.documentVersionId)}>
+                    <b>{item.displayName}</b>
+                    <small>{FORMAT_LABEL[item.format] ?? item.format} · {STATE_LABEL[item.job?.state ?? item.status] ?? item.status}</small>
+                  </button>
+                ))}
+                {total > docs.length ? <p className="empty">还有 {total - docs.length} 份未显示。当前列表读取前 50 份。</p> : null}
+              </div>
+            </>
+          ) : (
+            <button className="panel-expand" title="展开文稿栏" onClick={() => setLibraryOpen(true)}>
+              文稿<small>{docs.length}</small>
+            </button>
+          )}
         </aside>
         <section className="panel stage">
           <div className="body">

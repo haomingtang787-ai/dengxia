@@ -69,7 +69,7 @@ export function StudyView({
   const [progress, setProgress] = useState<StudyProgress | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-  // 窄窗里对话改成右下角抽屉：阅读讲稿时不再被聊天区挤掉高度。
+  // 对话默认收起，把高度让给讲解正文；点标题栏再展开。窄窗里由右下角按钮展开抽屉。
   const [chatOpen, setChatOpen] = useState(false)
   // 侧边栏可收放：大纲、总览/总结都能收起，把宽度让给讲解正文。
   const [outlineOpen, setOutlineOpen] = useState(true)
@@ -86,7 +86,7 @@ export function StudyView({
     const node = messagesRef.current
     if (!node) return
     node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' })
-  }, [messageCount, busy])
+  }, [messageCount, busy, chatOpen])
 
   // 换一讲时讲稿回到开头，左侧把当前讲滚进视野。
   useEffect(() => {
@@ -376,39 +376,43 @@ export function StudyView({
               ) : <p className="empty">这门课还没有小讲。</p>}
             </div>
             <section className={`study-chat${chatOpen ? ' open' : ''}`} aria-live="polite">
-              <div className="study-chat-head">
+              <div className="study-chat-head" role="button" tabIndex={0} onClick={() => setChatOpen((open) => !open)}>
                 <div>
-                  <h3>课堂对话</h3>
+                  <h3>课堂对话{chatOpen ? '' : ` · ${detail.messages.length}`}</h3>
                   <p className="quiet">问不懂、问为什么、让老师换个说法都行。每次追问都会带上这门课和本讲上下文。</p>
                 </div>
-                <button className="ghost study-chat-close" onClick={() => setChatOpen(false)} aria-label="收起对话">收起</button>
+                <span className="study-chat-head-toggle quiet">{chatOpen ? '收起 ▾' : '展开 ▴'}</span>
               </div>
-              <div className="study-messages" ref={messagesRef}>
-                {detail.messages.map((message) => (
-                  <div key={message.id} className={`study-message ${message.role}`}>
-                    <span className="study-message-role">{message.role === 'user' ? '你' : '老师'}</span>
-                    <p>{message.content}</p>
+              {chatOpen ? (
+                <>
+                  <div className="study-messages" ref={messagesRef}>
+                    {detail.messages.map((message) => (
+                      <div key={message.id} className={`study-message ${message.role}`}>
+                        <span className="study-message-role">{message.role === 'user' ? '你' : '老师'}</span>
+                        <p>{message.content}</p>
+                      </div>
+                    ))}
+                    {busy === 'send' ? <div className="study-message assistant pending"><span className="study-message-role">老师</span><p>正在结合本讲和整门课回答…</p></div> : null}
                   </div>
-                ))}
-                {busy === 'send' ? <div className="study-message assistant pending"><span className="study-message-role">老师</span><p>正在结合本讲和整门课回答…</p></div> : null}
-              </div>
-              <div className="study-composer">
-                <textarea
-                  value={question}
-                  placeholder={activeUnit ? `就「${activeUnit.title}」问一句，比如：为什么这一步不能反过来？` : '问老师一句…'}
-                  rows={3}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) void sendQuestion()
-                  }}
-                />
-                <div className="study-composer-side">
-                  <span className="quiet">Ctrl / Cmd + Enter 发送</span>
-                  <button className="primary" onClick={() => void sendQuestion()} disabled={busy !== null || !question.trim()}>
-                    {busy === 'send' ? '老师正在回答…' : '发送追问'}
-                  </button>
-                </div>
-              </div>
+                  <div className="study-composer">
+                    <textarea
+                      value={question}
+                      placeholder={activeUnit ? `就「${activeUnit.title}」问一句，比如：为什么这一步不能反过来？` : '问老师一句…'}
+                      rows={3}
+                      onChange={(event) => setQuestion(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) void sendQuestion()
+                      }}
+                    />
+                    <div className="study-composer-side">
+                      <span className="quiet">Ctrl / Cmd + Enter 发送</span>
+                      <button className="primary" onClick={() => void sendQuestion()} disabled={busy !== null || !question.trim()}>
+                        {busy === 'send' ? '老师正在回答…' : '发送追问'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : null}
             </section>
           </main>
 

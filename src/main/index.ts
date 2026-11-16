@@ -288,6 +288,12 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
       fs.mkdirSync(path.dirname(secondShot), { recursive: true })
       fs.writeFileSync(secondShot, topImage.toPNG())
     }
+    // 对话默认收起（点标题栏展开），先展开再填追问。
+    const openedChat = await win.webContents.executeJavaScript(
+      `(() => { const h = document.querySelector('.study-chat-head'); if (!h) return false; h.click(); return true })()`,
+    )
+    console.log('[smoke] 展开对话', openedChat)
+    await new Promise((resolve) => setTimeout(resolve, 400))
     const typed = await win.webContents.executeJavaScript(
       `(() => {
         const t = document.querySelector('.study-composer textarea');
@@ -299,13 +305,10 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
       })()`,
     )
     console.log('[smoke] 填写追问', typed)
-    // 窄窗里对话是右下角抽屉：先展开，再问，顺便验证抽屉的尺寸。
-    console.log('[smoke] 展开对话抽屉', await clickContains('课堂对话'))
-    await new Promise((resolve) => setTimeout(resolve, 400))
     const drawer = await win.webContents.executeJavaScript(
       `(() => { const c = document.querySelector('.study-chat'); if (!c) return null; const r = c.getBoundingClientRect(); return { open: c.classList.contains('open'), display: getComputedStyle(c).display, w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), bottom: Math.round(r.bottom) } })()`,
     )
-    console.log('[smoke] 对话抽屉', JSON.stringify(drawer))
+    console.log('[smoke] 对话区', JSON.stringify(drawer))
     await new Promise((resolve) => setTimeout(resolve, 300))
     console.log('[smoke] 发送追问', await click('发送追问'))
     let messages = 0
@@ -399,6 +402,22 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
       })()`,
     )
     console.log('[smoke] 侧栏收放', JSON.stringify(collapseProbe))
+    // 左侧文稿栏也可收起
+    const libraryProbe = await win.webContents.executeJavaScript(
+      `(async () => {
+        const wait = () => new Promise((r) => setTimeout(r, 150));
+        const shell = document.querySelector('.shell');
+        const snap = () => shell ? { cls: shell.className, cols: getComputedStyle(shell).gridTemplateColumns } : null;
+        const before = snap();
+        document.querySelector('.library .icon-btn')?.click();
+        await wait();
+        const after = snap();
+        document.querySelector('.library .panel-expand')?.click();
+        await wait();
+        return { before, after, restored: snap() };
+      })()`,
+    )
+    console.log('[smoke] 文稿栏收放', JSON.stringify(libraryProbe))
     await win.webContents.executeJavaScript(
       `document.querySelector('.study-room')?.scrollIntoView({ block: 'start' })`,
     )
