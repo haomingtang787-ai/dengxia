@@ -347,6 +347,45 @@ export class StudyService {
     }
   }
 
+  /** 清除这门课的对话记录（保留课程、总结、作答）。 */
+  clearChat(body: unknown): Result<StudySessionDetail> {
+    const requestId = randomUUID()
+    try {
+      const sessionId = this.sessionId(body)
+      const session = this.requireSession(sessionId)
+      this.store.clearMessages(session.id, nowIso())
+      return ok(requestId, this.detail(session.id))
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
+  /** 清除学习总结，回到「未生成」状态。 */
+  clearSummary(body: unknown): Result<StudySessionDetail> {
+    const requestId = randomUUID()
+    try {
+      const sessionId = this.sessionId(body)
+      const session = this.requireSession(sessionId)
+      this.store.clearSummary(session.id, nowIso())
+      return ok(requestId, this.detail(session.id))
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
+  /** 删除整门课。 */
+  deleteCourse(body: unknown): Result<StudySessionList> {
+    const requestId = randomUUID()
+    try {
+      const sessionId = this.sessionId(body)
+      const session = this.requireSession(sessionId)
+      this.store.deleteSession(session.id)
+      return ok(requestId, { items: this.store.listSessions() })
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
   private async collectMaterial(versionId: string): Promise<Material> {
     const pages = this.options.db.all<PageRow>(
       'SELECT id, ordinal, source_kind, source_number FROM pages WHERE document_version_id = ? ORDER BY ordinal ASC',

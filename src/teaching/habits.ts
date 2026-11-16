@@ -41,19 +41,13 @@ export const MINUTE_OPTIONS: { id: 15 | 25 | 40; label: string }[] = [
   { id: 40, label: "40 分钟" },
 ];
 
-export const WINDOW_OPTIONS: { id: StudyWindow; label: string }[] = [
-  { id: "morning", label: "早上" },
-  { id: "afternoon", label: "下午" },
-  { id: "evening", label: "晚上" },
-  { id: "night", label: "睡前" },
-];
-
 export const AVOID_OPTIONS: { id: Avoid; label: string }[] = [
   { id: "formula", label: "公式堆着" },
   { id: "long", label: "段落太长" },
   { id: "noexample", label: "没有例子" },
 ];
 
+/** 时段只在排课日期标签里用（今晚/明晚），不再作为可选项暴露给用户。 */
 export function windowLabel(window: StudyWindow): string {
   if (window === "morning") return "早上";
   if (window === "afternoon") return "下午";
@@ -110,14 +104,14 @@ export function remembers(h: Habits, slowTaps: number): string {
         ? "没有例子你不容易记住，核心的地方我会补一个算得完的例子。"
         : "长段落会让你走神，所以我拆成小讲。";
   const slow = slowTaps >= 2 ? "你连续让我放慢，进度就改成每天一小讲。" : "";
-  return `${head}每次大约 ${h.minutes} 分钟，习惯${windowLabel(h.window)}学。${pace}${style}${avoid}${slow}`;
+  return `${head}每次大约 ${h.minutes} 分钟。${pace}${style}${avoid}${slow}`;
 }
 
 export function habitBrief(h: Habits): string {
   const name = h.name.trim();
   return [
     name ? `学生希望被称呼为「${name}」。全文最多称呼两次。` : "学生没有留名字，用「你」，不要编造姓名。",
-    `一次大约学习 ${h.minutes} 分钟，习惯${windowLabel(h.window)}学。`,
+    `一次大约学习 ${h.minutes} 分钟。`,
     h.pace === "slow"
       ? "希望讲透、可以慢。每个小讲先把句子抱住，再讲条件。teaching 一百六到两百四十字。"
       : h.pace === "exam"

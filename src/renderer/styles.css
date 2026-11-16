@@ -211,6 +211,8 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .sitting { background: #f4f6ff; border: 1px solid #d9e0fb; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
 .sitting-line { margin: 0; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; font-size: 17px; }
 .habit-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.habit-group { display: flex; flex-direction: column; gap: 5px; }
+.habit-label { font-size: 12px; color: #5c6b7f; }
 .pill { border-radius: 999px; border: 1px solid #e6e8ee; background: #fff; padding: 4px 10px; font-size: 13px; }
 .pill.active { background: #eef2ff; border-color: #c7d2fe; }
 .unit-list { display: flex; flex-direction: column; gap: 6px; }
@@ -377,6 +379,20 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-composer textarea:focus { outline: none; border-color: #1f9d80; box-shadow: 0 0 0 3px rgba(31,157,128,.12); }
 .study-composer-side { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .study-side .study-overview, .study-side .study-summary { border: 1px solid #e4e9e6; border-radius: 16px; padding: 14px; background: #fff; }
+.study-manage { position: relative; }
+.study-manage-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+  min-width: 180px; display: flex; flex-direction: column; gap: 2px;
+  background: #fff; border: 1px solid #e6e8ee; border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(36, 50, 71, 0.16); padding: 6px;
+}
+.study-manage-menu button {
+  text-align: left; border: none; background: transparent; border-radius: 8px;
+  padding: 8px 10px; font: inherit; color: #243247; cursor: pointer;
+}
+.study-manage-menu button:hover { background: #f3f6f5; }
+.study-manage-menu .danger-text { color: #b4433a; }
+.study-manage-menu .danger-text:hover { background: #fdf1f0; }
 .study-usage { border: 1px solid #e4e9e6; border-radius: 16px; padding: 12px 14px; background: #fff; }
 .study-usage p { margin: 6px 0 0; font-size: 12px; color: #3d5049; }
 .study-usage .study-usage-hit { color: #1f7f6a; font-weight: 600; }
@@ -453,6 +469,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   padding: 0;
 }
 .stage .study-unit-sheet > header h3 { max-width: 100%; overflow-wrap: anywhere; }
+
+/* 文稿详情 / 复习页的 header 不再叠加顶栏 padding，去掉上方多余空白 */
+.stage .sheet > header { padding: 0 0 6px; }
 
 /* 滚动条统一变细变淡，长讲稿滚动时不再又粗又跳。 */
 ::-webkit-scrollbar { width: 9px; height: 9px; }

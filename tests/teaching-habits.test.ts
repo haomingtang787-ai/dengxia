@@ -38,7 +38,6 @@ describe('习惯画像', () => {
     expect(brief).toContain('「小明」')
     expect(brief).toContain('最多称呼两次')
     expect(brief).toContain('15 分钟')
-    expect(brief).toContain('晚上')
   })
 
   it('没留名字时不许模型编造姓名', () => {

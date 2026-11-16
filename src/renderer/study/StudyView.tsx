@@ -7,8 +7,6 @@ import {
   MINUTE_OPTIONS,
   PACE_OPTIONS,
   STYLE_OPTIONS,
-  WINDOW_OPTIONS,
-  windowLabel,
   type Habits,
 } from '../../teaching/habits'
 
@@ -45,7 +43,7 @@ function habitSummary(habits: Habits): string {
   const style = STYLE_OPTIONS.find((item) => item.id === habits.style)?.label ?? '先比方'
   const avoid = AVOID_OPTIONS.find((item) => item.id === habits.avoid)?.label ?? '长段落'
   const name = habits.name.trim() ? `${habits.name.trim()}，` : ''
-  return `${name}一次约 ${habits.minutes} 分钟，习惯${windowLabel(habits.window)}学；节奏${pace}、方式${style}；避开${avoid}。`
+  return `${name}一次约 ${habits.minutes} 分钟；节奏${pace}、方式${style}；避开${avoid}。`
 }
 
 export function StudyView({
@@ -74,6 +72,9 @@ export function StudyView({
   // 侧边栏可收放：大纲、总览/总结都能收起，把宽度让给讲解正文。
   const [outlineOpen, setOutlineOpen] = useState(true)
   const [sideOpen, setSideOpen] = useState(true)
+  // 「管理」菜单：清对话 / 清总结 / 删课程，二次点击确认。
+  const [manageOpen, setManageOpen] = useState(false)
+  const [confirmAction, setConfirmAction] = useState<'chat' | 'summary' | 'delete' | null>(null)
   const autoStarted = useRef('')
   // 三个滚动容器：讲稿区、消息区、当前讲次按钮，分别接管自己的滚动。
   const sheetScrollRef = useRef<HTMLDivElement | null>(null)
@@ -245,6 +246,40 @@ export function StudyView({
     if (!result.ok) notify('bad', result.error.message)
   }
 
+  async function clearChat() {
+    if (!api || !detail) return
+    const result = await api.study.clearChat({ sessionId: detail.sessionId })
+    if (!result.ok) { notify('bad', result.error.message); return }
+    setDetail(result.data)
+    setManageOpen(false)
+    setConfirmAction(null)
+    notify('info', '对话记录已清除。')
+  }
+
+  async function clearSummary() {
+    if (!api || !detail) return
+    const result = await api.study.clearSummary({ sessionId: detail.sessionId })
+    if (!result.ok) { notify('bad', result.error.message); return }
+    setDetail(result.data)
+    setManageOpen(false)
+    setConfirmAction(null)
+    notify('info', '学习总结已清除，可以重新生成。')
+  }
+
+  async function deleteCourse() {
+    if (!api || !detail) return
+    const docId = detail.documentVersionId
+    const result = await api.study.delete({ sessionId: detail.sessionId })
+    if (!result.ok) { notify('bad', result.error.message); return }
+    setDetail(null)
+    setUnitId(null)
+    setManageOpen(false)
+    setConfirmAction(null)
+    autoStarted.current = docId
+    setSessions(result.data.items)
+    notify('info', '这门课已删除。')
+  }
+
   if (loading) {
     return <div className="study-empty"><p className="quiet">正在读取你的课堂…</p></div>
   }
@@ -265,6 +300,24 @@ export function StudyView({
         </div>
         <div className="row study-actions">
           <button className="ghost" onClick={onOpenDocs}>文稿库</button>
+          {detail ? (
+            <div className="study-manage">
+              <button className="ghost" onClick={() => { setManageOpen((open) => !open); setConfirmAction(null) }}>管理</button>
+              {manageOpen ? (
+                <div className="study-manage-menu">
+                  <button onClick={() => (confirmAction === 'chat' ? void clearChat() : setConfirmAction('chat'))}>
+                    {confirmAction === 'chat' ? '再点一次，清除全部对话' : '清除对话记录'}
+                  </button>
+                  <button onClick={() => (confirmAction === 'summary' ? void clearSummary() : setConfirmAction('summary'))}>
+                    {confirmAction === 'summary' ? '再点一次，清除总结' : '清除学习总结'}
+                  </button>
+                  <button className="danger-text" onClick={() => (confirmAction === 'delete' ? void deleteCourse() : setConfirmAction('delete'))}>
+                    {confirmAction === 'delete' ? '再点一次，删除这门课' : '删除这门课'}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <button className="primary" onClick={() => void createCourse()} disabled={busy !== null || !selectedDoc}>
             {busy === 'create' ? '正在完整读懂并拆课…' : detail ? '用当前文稿再开一门' : '完整读懂并拆课'}
           </button>
@@ -298,30 +351,37 @@ export function StudyView({
               <span>称呼</span>
               <input value={habits.name} maxLength={16} placeholder="留空就用「你」" onChange={(event) => void patchHabits({ name: event.target.value })} />
             </label>
-            <div className="habit-row">
-              {PACE_OPTIONS.map((item) => (
-                <button key={item.id} className={`pill ${habits.pace === item.id ? 'active' : ''}`} onClick={() => void patchHabits({ pace: item.id })}>{item.label}</button>
-              ))}
+            <div className="habit-group">
+              <span className="habit-label">节奏</span>
+              <div className="habit-row">
+                {PACE_OPTIONS.map((item) => (
+                  <button key={item.id} className={`pill ${habits.pace === item.id ? 'active' : ''}`} onClick={() => void patchHabits({ pace: item.id })}>{item.label}</button>
+                ))}
+              </div>
             </div>
-            <div className="habit-row">
-              {STYLE_OPTIONS.map((item) => (
-                <button key={item.id} className={`pill ${habits.style === item.id ? 'active' : ''}`} onClick={() => void patchHabits({ style: item.id })}>{item.label}</button>
-              ))}
+            <div className="habit-group">
+              <span className="habit-label">讲解方式</span>
+              <div className="habit-row">
+                {STYLE_OPTIONS.map((item) => (
+                  <button key={item.id} className={`pill ${habits.style === item.id ? 'active' : ''}`} onClick={() => void patchHabits({ style: item.id })}>{item.label}</button>
+                ))}
+              </div>
             </div>
-            <div className="habit-row">
-              {MINUTE_OPTIONS.map((item) => (
-                <button key={item.id} className={`pill ${habits.minutes === item.id ? 'active' : ''}`} onClick={() => void patchHabits({ minutes: item.id })}>{item.label}</button>
-              ))}
+            <div className="habit-group">
+              <span className="habit-label">一坐时长</span>
+              <div className="habit-row">
+                {MINUTE_OPTIONS.map((item) => (
+                  <button key={item.id} className={`pill ${habits.minutes === item.id ? 'active' : ''}`} onClick={() => void patchHabits({ minutes: item.id })}>{item.label}</button>
+                ))}
+              </div>
             </div>
-            <div className="habit-row">
-              {WINDOW_OPTIONS.map((item) => (
-                <button key={item.id} className={`pill ${habits.window === item.id ? 'active' : ''}`} onClick={() => void patchHabits({ window: item.id })}>{item.label}</button>
-              ))}
-            </div>
-            <div className="habit-row">
-              {AVOID_OPTIONS.map((item) => (
-                <button key={item.id} className={`pill ${habits.avoid === item.id ? 'active' : ''}`} onClick={() => void patchHabits({ avoid: item.id })}>{item.label}</button>
-              ))}
+            <div className="habit-group">
+              <span className="habit-label">要避开</span>
+              <div className="habit-row">
+                {AVOID_OPTIONS.map((item) => (
+                  <button key={item.id} className={`pill ${habits.avoid === item.id ? 'active' : ''}`} onClick={() => void patchHabits({ avoid: item.id })}>{item.label}</button>
+                ))}
+              </div>
             </div>
           </aside>
         </div>

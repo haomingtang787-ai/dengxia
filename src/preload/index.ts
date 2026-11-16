@@ -110,6 +110,12 @@ const desk = {
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyFinish, body),
     check: (body: { sessionId: string; unitOrdinal: number; segmentIndex: number; answer: string }) =>
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyCheck, body),
+    clearChat: (body: { sessionId: string }) =>
+      invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyClearChat, body),
+    clearSummary: (body: { sessionId: string }) =>
+      invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyClearSummary, body),
+    delete: (body: { sessionId: string }) =>
+      invoke<import('../shared/study').StudySessionList>(IpcChannel.studyDelete, body),
     onProgress: (callback: (progress: import('../shared/study').StudyProgress) => void) => {
       const listener = (_event: IpcRendererEvent, payload: import('../shared/study').StudyProgress) => callback(payload)
       ipcRenderer.on(IpcChannel.studyProgress, listener)

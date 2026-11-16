@@ -5,7 +5,6 @@ import {
   DEFAULT_HABITS,
   MINUTE_OPTIONS,
   PACE_OPTIONS,
-  WINDOW_OPTIONS,
   type Habits,
 } from '../../teaching/habits'
 
@@ -222,12 +221,6 @@ export function ClassView({ notify, onOpenDocs }: { notify: Notify; onOpenDocs: 
         <span className="quiet">节奏</span>
         {PACE_OPTIONS.map((option) => (
           <button key={option.id} className={`pill ${habits.pace === option.id ? 'active' : ''}`} onClick={() => void patchHabits({ pace: option.id })}>
-            {option.label}
-          </button>
-        ))}
-        <span className="quiet">时段</span>
-        {WINDOW_OPTIONS.map((option) => (
-          <button key={option.id} className={`pill ${habits.window === option.id ? 'active' : ''}`} onClick={() => void patchHabits({ window: option.id })}>
             {option.label}
           </button>
         ))}

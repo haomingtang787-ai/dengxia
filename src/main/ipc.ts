@@ -81,6 +81,9 @@ export function registerIpc(
   bind(IpcChannel.studySend, (_event, body) => study.send(body))
   bind(IpcChannel.studyFinish, (_event, body) => study.finish(body))
   bind(IpcChannel.studyCheck, (_event, body) => study.check(body))
+  bind(IpcChannel.studyClearChat, (_event, body) => study.clearChat(body))
+  bind(IpcChannel.studyClearSummary, (_event, body) => study.clearSummary(body))
+  bind(IpcChannel.studyDelete, (_event, body) => study.deleteCourse(body))
   bind(IpcChannel.appInfo, () => appInfo.info())
   bind(IpcChannel.appCheckUpdate, () => appInfo.checkUpdate())
   return [...IPC_INVOKE_CHANNELS]

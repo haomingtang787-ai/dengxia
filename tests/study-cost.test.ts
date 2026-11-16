@@ -190,6 +190,36 @@ describe('开课成本：分段理解复用与 token 用量', () => {
     expect(second.ok).toBe(true)
     expect(digestCalls(fetchImpl)).toBeGreaterThan(callsAfterFirst)
   })
+
+  it('清除对话只删消息、课程与总结保留；清总结回到未生成；删课程整门消失', async () => {
+    const fetchImpl = fakeFetch()
+    const service = buildService(fetchImpl)
+    const created = await service.create({ requestId: randomUUID(), documentVersionId: VERSION_ID, title: '存储器讲义' })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    const sessionId = created.data.sessionId
+
+    await service.send({ sessionId, content: '地址线 16 根能寻多大？' })
+    await service.finish({ sessionId })
+
+    const clearedChat = service.clearChat({ sessionId })
+    expect(clearedChat.ok).toBe(true)
+    if (!clearedChat.ok) return
+    expect(clearedChat.data.messages).toHaveLength(0)
+    expect(clearedChat.data.units.length).toBeGreaterThan(0)
+    expect(clearedChat.data.summary).not.toBeNull()
+
+    const clearedSummary = service.clearSummary({ sessionId })
+    expect(clearedSummary.ok).toBe(true)
+    if (!clearedSummary.ok) return
+    expect(clearedSummary.data.summary).toBeNull()
+
+    const del = service.deleteCourse({ sessionId })
+    expect(del.ok).toBe(true)
+    if (!del.ok) return
+    expect(del.data.items.some((item) => item.sessionId === sessionId)).toBe(false)
+    expect(service.get({ sessionId }).ok).toBe(false)
+  })
 })
 
 describe('重试提示的前缀稳定性', () => {

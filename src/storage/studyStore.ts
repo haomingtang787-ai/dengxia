@@ -186,6 +186,31 @@ export class StudyStore {
     this.db.run('UPDATE study_sessions SET updated_at = ? WHERE id = ?', updatedAt, sessionId)
   }
 
+  /** 清除一门课的对话记录，保留课程与总结。 */
+  clearMessages(sessionId: string, updatedAt: string): void {
+    this.db.transaction(() => {
+      this.db.run('DELETE FROM study_messages WHERE session_id = ?', sessionId)
+      this.db.run('UPDATE study_sessions SET updated_at = ? WHERE id = ?', updatedAt, sessionId)
+    })
+  }
+
+  /** 清除一门课的学习总结，回到「未生成」状态。 */
+  clearSummary(sessionId: string, updatedAt: string): void {
+    this.db.run(
+      "UPDATE study_sessions SET summary_json = '', status = 'ready', updated_at = ? WHERE id = ?",
+      updatedAt,
+      sessionId,
+    )
+  }
+
+  /** 删除一门课（units/messages/checks 随外键级联；ai_usage 手动清掉）。 */
+  deleteSession(sessionId: string): void {
+    this.db.transaction(() => {
+      this.db.run('DELETE FROM ai_usage WHERE session_id = ?', sessionId)
+      this.db.run('DELETE FROM study_sessions WHERE id = ?', sessionId)
+    })
+  }
+
   listChecks(sessionId: string): StudyCheckRow[] {
     return this.db.all<StudyCheckRow>(
       'SELECT * FROM study_checks WHERE session_id = ? ORDER BY unit_ordinal ASC, segment_index ASC',
