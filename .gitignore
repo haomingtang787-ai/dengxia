@@ -1,0 +1,22 @@
+node_modules/
+out/
+dist/
+dist-sandbox/
+*.log
+.DS_Store
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+.vite/
+
+# 本地工作区记忆与验收截图不入库，只留文档
+.workbuddy/
+docs/teaching-evidence/
+docs/fixtures/
+build/
+resources/icon.png
+
+# 由 build:sandbox 生成的沙箱辅助程序
+resources/office-sandbox/

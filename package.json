@@ -1,0 +1,43 @@
+{
+  "name": "desk-teacher-agent",
+  "version": "0.5.0",
+  "private": true,
+  "description": "灯下：本地单用户教师文稿工作台，导入、解析、预览、AI 私教与复习",
+  "main": "out/main/index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "npm run build:worker && electron-vite dev",
+    "build": "electron-vite build && npm run build:worker && npm run build:sandbox",
+    "build:worker": "esbuild workers/documentWorker.ts --bundle --platform=node --format=esm --outfile=out/worker/documentWorker.mjs --packages=external --sourcemap",
+    "build:sandbox": "node scripts/build-sandbox.mjs",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.renderer.json",
+    "test": "vitest run",
+    "generate-fixtures": "node --experimental-strip-types --no-warnings=ExperimentalWarning scripts/generate-fixtures.ts",
+    "dist:win": "npm run build && electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "1.1.1",
+    "fast-xml-parser": "5.12.1",
+    "fflate": "0.8.3",
+    "pdfjs-dist": "6.5.438",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.3.0",
+    "electron": "45.3.2",
+    "electron-builder": "26.18.0",
+    "electron-vite": "6.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.0"
+  }
+}

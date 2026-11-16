@@ -1,0 +1,299 @@
+import type { ResearchSource } from '../shared/research'
+
+export type AiConfig = { baseUrl: string; model: string; apiKey: string }
+
+/** 一次模型调用的 token 用量；cachedTokens 是服务端前缀缓存命中的部分（按缓存价计费）。 */
+export type AiUsage = {
+  promptTokens: number
+  cachedTokens: number
+  completionTokens: number
+}
+
+export type AiUsageSink = (kind: string, usage: AiUsage) => void
+
+function retryDelay(attempt: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.min(4000, 800 * 2 ** attempt)))
+}
+
+function retryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500
+}
+
+export class AiError extends Error {
+  constructor(
+    readonly code: 'AI_FAILED' | 'AI_NOT_CONFIGURED',
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
+/** OpenAI 兼容的 /chat/completions；只走主进程，渲染层拿不到密钥。 */
+export class AiClient {
+  constructor(
+    private readonly config: AiConfig,
+    private readonly fetchImpl: typeof fetch = globalThis.fetch,
+    private readonly timeoutMs = 60_000,
+    private readonly onUsage?: AiUsageSink,
+  ) {}
+
+  private endpoint(): string {
+    const base = this.config.baseUrl.replace(/\/+$/, '')
+    return base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
+  }
+
+  private modelsEndpoint(): string {
+    const base = this.config.baseUrl.replace(/\/+$/, '').replace(/\/chat\/completions$/, '')
+    return `${base}/models`
+  }
+
+  private searchEndpoint(): string {
+    const base = this.config.baseUrl.replace(/\/+$/, '').replace(/\/chat\/completions$/, '')
+    if (!base.includes('api.deepseek.com')) {
+      throw new AiError('AI_FAILED', '联网查证目前只支持 DeepSeek 官方地址（api.deepseek.com/v1）。')
+    }
+    const root = base.replace(/\/v1$/, '')
+    return `${root}/v1/tools/search`
+  }
+
+  private authHeaders(json = false): Record<string, string> {
+    const headers: Record<string, string> = {}
+    if (json) headers['content-type'] = 'application/json'
+    if (this.config.apiKey) headers.authorization = `Bearer ${this.config.apiKey}`
+    return headers
+  }
+
+  async listModels(): Promise<string[]> {
+    let response: Response
+    try {
+      response = await this.fetchImpl(this.modelsEndpoint(), {
+        headers: this.authHeaders(),
+        signal: AbortSignal.timeout(30_000),
+      })
+    } catch {
+      throw new AiError('AI_FAILED', '连不上模型服务，检查地址、网络和密钥。')
+    }
+    const text = await response.text()
+    if (!response.ok) {
+      throw new AiError('AI_FAILED', `拉取模型返回 ${response.status}：${text.slice(0, 160)}`)
+    }
+    let body: unknown
+    try {
+      body = JSON.parse(text)
+    } catch {
+      throw new AiError('AI_FAILED', '模型列表不是 JSON。')
+    }
+    const raw = Array.isArray(body)
+      ? body
+      : (body as { data?: unknown }).data
+    const ids = Array.isArray(raw)
+      ? raw
+          .map((item) => (typeof item === 'string' ? item : (item as { id?: unknown })?.id))
+          .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      : []
+    if (ids.length === 0) throw new AiError('AI_FAILED', '模型服务没有返回可用的模型。')
+    return [...new Set(ids.map((id) => id.trim()))].slice(0, 200)
+  }
+
+  /** DeepSeek 的独立 Search 接口；只读网页，不把结果直接当成模型答案。 */
+  async search(query: string, count = 5): Promise<ResearchSource[]> {
+    const trimmed = Array.from(query.trim()).slice(0, 128).join('')
+    if (!trimmed) throw new AiError('AI_FAILED', '没有可搜索的文字。')
+    if (!this.config.apiKey) throw new AiError('AI_NOT_CONFIGURED', '先在「模型」里填好密钥，再联网查证。')
+    const endpoint = this.searchEndpoint()
+    let response: Response
+    try {
+      response = await this.fetchImpl(endpoint, {
+        method: 'POST',
+        headers: this.authHeaders(true),
+        body: JSON.stringify({
+          query: trimmed,
+          count: Math.max(1, Math.min(50, Math.round(count))),
+          ori_question: '核对课件这一页的概念、公式和说法是否准确',
+          need_content: false,
+        }),
+        signal: AbortSignal.timeout(30_000),
+      })
+    } catch {
+      throw new AiError('AI_FAILED', '连不上 DeepSeek 的搜索服务，检查网络和密钥。')
+    }
+    const text = await response.text()
+    if (!response.ok) {
+      throw new AiError('AI_FAILED', `搜索服务返回 ${response.status}：${text.slice(0, 160)}`)
+    }
+    let body: unknown
+    try {
+      body = JSON.parse(text)
+    } catch {
+      throw new AiError('AI_FAILED', '搜索服务返回的不是 JSON。')
+    }
+    const raw = (body as { results?: unknown }).results
+    if (!Array.isArray(raw)) return []
+    return raw
+      .map((item): ResearchSource => {
+        const row = (item ?? {}) as Record<string, unknown>
+        return {
+          title: str(row.title),
+          url: str(row.url),
+          snippet: str(row.snippet),
+          summary: str(row.summary) || str(row.snippet),
+          siteName: row.site_name == null ? null : str(row.site_name),
+          date: row.date == null ? null : str(row.date),
+          authority: num(row.authority),
+          score: num(row.rerank_score),
+        }
+      })
+      .filter((item) => item.title.length > 0 && isHttpUrl(item.url))
+      .slice(0, 10)
+  }
+
+  async complete(
+    system: string,
+    user: string,
+    maxTokens = 4096,
+    thinking: 'enabled' | 'disabled' = 'enabled',
+    kind = 'chat',
+  ): Promise<string> {
+    let response: Response | null = null
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        response = await this.fetchImpl(this.endpoint(), {
+          method: 'POST',
+          headers: this.authHeaders(true),
+          body: JSON.stringify({
+            model: this.config.model,
+            messages: [
+              { role: 'system', content: system },
+              { role: 'user', content: user },
+            ],
+            temperature: 0.4,
+            max_tokens: maxTokens,
+            ...(thinking === 'disabled' ? { thinking: { type: 'disabled' } } : {}),
+          }),
+          signal: AbortSignal.timeout(this.timeoutMs),
+        })
+      } catch (error) {
+        if (attempt < 2) {
+          await retryDelay(attempt)
+          continue
+        }
+        throw new AiError('AI_FAILED', '连不上模型服务，检查地址、网络和密钥。')
+      }
+      if (response.ok || !retryableStatus(response.status) || attempt === 2) break
+      await retryDelay(attempt)
+    }
+    if (!response) throw new AiError('AI_FAILED', '连不上模型服务，检查地址、网络和密钥。')
+    const text = await response.text()
+    if (!response.ok) {
+      throw new AiError('AI_FAILED', `模型服务返回 ${response.status}：${text.slice(0, 160)}`)
+    }
+
+    let body: unknown
+    try {
+      body = JSON.parse(text)
+    } catch {
+      throw new AiError('AI_FAILED', '模型服务返回的不是 JSON。')
+    }
+    const content = (body as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content
+    if (typeof content !== 'string' || !content.trim()) {
+      throw new AiError('AI_FAILED', '模型没有返回内容。')
+    }
+    this.onUsage?.(kind, usageOf(body))
+    return content
+  }
+
+  /** 让支持图片输入的 OpenAI 兼容模型读一张图；用于扫描件、图表和课件截图。 */
+  async describeImage(input: { mime: string; base64: string; prompt: string; model?: string; system?: string; kind?: string }): Promise<string> {
+    let response: Response | null = null
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        response = await this.fetchImpl(this.endpoint(), {
+          method: 'POST',
+          headers: this.authHeaders(true),
+          body: JSON.stringify({
+            model: input.model ?? this.config.model,
+            messages: [
+              ...(input.system ? [{ role: 'system', content: input.system }] : []),
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: input.prompt },
+                  { type: 'image_url', image_url: { url: `data:${input.mime};base64,${input.base64}` } },
+                ],
+              },
+            ],
+            temperature: 0.2,
+            max_tokens: 3200,
+          }),
+          signal: AbortSignal.timeout(Math.max(this.timeoutMs, 90_000)),
+        })
+      } catch {
+        if (attempt < 2) {
+          await retryDelay(attempt)
+          continue
+        }
+        throw new AiError('AI_FAILED', '连不上模型服务，检查地址、网络和密钥。')
+      }
+      if (response.ok || !retryableStatus(response.status) || attempt === 2) break
+      await retryDelay(attempt)
+    }
+    if (!response) throw new AiError('AI_FAILED', '连不上模型服务，检查地址、网络和密钥。')
+    const text = await response.text()
+    if (!response.ok) {
+      throw new AiError('AI_FAILED', `模型服务返回 ${response.status}：${text.slice(0, 160)}`)
+    }
+    let body: unknown
+    try {
+      body = JSON.parse(text)
+    } catch {
+      throw new AiError('AI_FAILED', '模型服务返回的不是 JSON。')
+    }
+    const content = (body as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content
+    if (typeof content === 'string' && content.trim()) {
+      this.onUsage?.(input.kind ?? 'vision', usageOf(body))
+      return content
+    }
+    if (Array.isArray(content)) {
+      const joined = content
+        .map((part) => (typeof part === 'string' ? part : (part as { text?: unknown })?.text))
+        .filter((part): part is string => typeof part === 'string')
+        .join('\n')
+        .trim()
+      if (joined) {
+        this.onUsage?.(input.kind ?? 'vision', usageOf(body))
+        return joined
+      }
+    }
+    throw new AiError('AI_FAILED', '模型没有返回图像说明。检查模型是否支持图片；DeepSeek 请用 deepseek-flash。')
+  }
+}
+
+/** OpenAI 兼容响应里的 usage；DeepSeek 在 prompt_tokens_details.cached_tokens 里报前缀缓存命中。 */
+function usageOf(body: unknown): AiUsage {
+  const usage = (body as { usage?: Record<string, unknown> }).usage
+  if (!usage || typeof usage !== 'object') return { promptTokens: 0, cachedTokens: 0, completionTokens: 0 }
+  const details = (usage.prompt_tokens_details ?? {}) as Record<string, unknown>
+  const toCount = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : 0)
+  return {
+    promptTokens: toCount(usage.prompt_tokens),
+    cachedTokens: toCount(details.cached_tokens),
+    completionTokens: toCount(usage.completion_tokens),
+  }
+}
+
+function str(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function num(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
+}

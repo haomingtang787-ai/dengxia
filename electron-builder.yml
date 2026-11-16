@@ -1,0 +1,30 @@
+appId: local.desk.teacher-agent
+productName: 灯下
+executableName: desk
+icon: build/icon.png
+directories:
+  output: dist
+electronDist: node_modules/electron/dist
+files:
+  - out/**
+  - package.json
+asarUnpack:
+  - node_modules/pdfjs-dist/**
+  - node_modules/@napi-rs/canvas/**
+  - node_modules/@napi-rs/canvas-*/**
+extraResources:
+  - from: resources/office-sandbox
+    to: office-sandbox
+win:
+  target:
+    - nsis
+  signAndEditExecutable: false
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: DengXia-setup-${version}.${ext}
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+publish: null

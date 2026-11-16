@@ -1,0 +1,40 @@
+{
+  "sample.txt": [
+    "txt-p-0001",
+    "txt-p-0002",
+    "txt-p-0003"
+  ],
+  "sample.docx": [
+    "docx-p-0001",
+    "docx-p-0002",
+    "docx-p-0003"
+  ],
+  "sample.pptx": [
+    {
+      "anchor": "pptx-s001-sh001",
+      "slideNumber": 1,
+      "bbox": [
+        0,
+        0,
+        0.5,
+        0.2
+      ],
+      "text": "一次函数"
+    },
+    {
+      "anchor": "pptx-s002-sh001",
+      "slideNumber": 2,
+      "bbox": [
+        0.25,
+        0.4,
+        0.5,
+        0.2
+      ],
+      "text": "练习"
+    }
+  ],
+  "sample.pdf": {
+    "text": "Hello PDF",
+    "pageNumber": 1
+  }
+}

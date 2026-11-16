@@ -1,0 +1,416 @@
+:root {
+  color: #243247;
+  background: #f7f8fa;
+  font-family: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; min-height: 100%; background: #f7f8fa; color: #243247; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.app {
+  height: 100vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-end;
+  padding: 22px 28px 14px;
+}
+.brand { display: flex; flex-direction: column; gap: 2px; }
+.brand-title { display: flex; align-items: center; gap: 9px; }
+.brand-logo { width: 26px; height: 26px; flex: 0 0 auto; }
+.brand strong {
+  font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.brand span, .quiet { color: #5c6b7f; font-size: 13px; }
+.app-update { margin-top: 6px; border-top: 1px dashed #e2eae6; padding-top: 10px; }
+.app-update .row { justify-content: space-between; }
+.update-note { margin: 8px 0 0; font-size: 12px; color: #5c6b7f; line-height: 1.5; }
+.update-note.ok { color: #1f7f6a; }
+.update-note a { margin-left: 8px; color: #1f7f6a; }
+
+.shell {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 320px;
+  gap: 16px;
+  padding: 0 20px 20px;
+  min-height: 0;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #e6e8ee;
+  border-radius: 16px;
+  min-height: 0;
+  box-shadow: 0 10px 28px rgba(36, 50, 71, 0.04);
+}
+
+.library, .locator { display: flex; flex-direction: column; overflow: hidden; }
+.library header, .locator header, .stage header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 16px 8px;
+}
+.library h2, .locator h2, .stage h2 { margin: 0; font-size: 16px; font-weight: 650; }
+
+.primary, .ghost, .danger {
+  border-radius: 9px;
+  border: 1px solid transparent;
+  padding: 8px 12px;
+}
+.primary { background: #4263eb; color: white; }
+.primary:hover { background: #3656d6; }
+.ghost { background: #fff; border-color: #d5dae4; }
+.ghost:hover { border-color: #4263eb; }
+.danger { background: #fff; color: #8d2b2b; border-color: #f0c9c9; }
+
+.doc-list { overflow: auto; padding: 4px 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.doc {
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.doc.active { background: #f4f6ff; border-color: #d9e0fb; }
+.doc b { display: block; font-weight: 650; }
+.doc small { color: #5c6b7f; }
+
+.stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.stage .body { padding: 8px 22px 22px; overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sheet {
+  background: #fff;
+  border-radius: 18px;
+  min-height: 460px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.meta { display: flex; flex-wrap: wrap; gap: 8px; color: #5c6b7f; font-size: 13px; }
+.chip {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #f3f5f8;
+  color: #243247;
+}
+.chip.warn { background: #fff6e8; color: #8a5a12; }
+.chip.bad { background: #fdecec; color: #8d2b2b; }
+.chip.ok { background: #e8f6ee; color: #1f7a4d; }
+.auto-pill {
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: #eef2ff;
+  color: #3346a8;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.page-frame { position: relative; background: #f7f8fa; border-radius: 12px; overflow: hidden; min-height: 280px; }
+.page-frame img { width: 100%; height: auto; display: block; }
+.bbox {
+  position: absolute;
+  border: 2px solid #4263eb;
+  background: rgba(66, 99, 235, 0.12);
+  pointer-events: none;
+}
+.pager { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+.transcript { display: flex; flex-direction: column; gap: 12px; }
+.block {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid transparent;
+  white-space: pre-wrap;
+}
+.block.heading { font-weight: 680; font-size: 18px; }
+.block.code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; background: #f7f8fa; border-radius: 8px; }
+.block.focus { border-left-color: #4263eb; background: #f4f6ff; }
+
+.warnings { display: flex; flex-direction: column; gap: 8px; }
+.warning, .banner {
+  background: #fff6e8;
+  color: #6d4a10;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.banner.bad { background: #fdecec; color: #8d2b2b; }
+.banner.info { background: #f4f6ff; color: #243247; }
+
+.progress { height: 6px; background: #e8ebf2; border-radius: 99px; overflow: hidden; }
+.progress span { display: block; height: 100%; background: #4263eb; }
+.progress.indeterminate span { width: 35%; animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
+
+.locator .items { overflow: auto; padding: 0 10px 16px; display: flex; flex-direction: column; gap: 8px; }
+.anchor {
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e6e8ee;
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+.anchor.focus { border-color: #4263eb; }
+.anchor b { display: block; font-size: 12px; color: #4263eb; font-weight: 650; }
+.anchor p { margin: 4px 0 0; }
+
+.prereq { display: flex; flex-direction: column; gap: 10px; }
+.prereq h3 { margin: 0; font-size: 16px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; }
+.empty { color: #5c6b7f; padding: 18px; }
+
+.dialog-back {
+  position: fixed;
+  inset: 0;
+  background: rgba(36, 50, 71, 0.28);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.dialog {
+  width: min(460px, 100%);
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 18px 50px rgba(36, 50, 71, 0.16);
+}
+
+.top-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.tabs { display: flex; gap: 6px; }
+.tab { background: #fff; border: 1px solid #e6e8ee; border-radius: 999px; padding: 6px 14px; }
+.tab.active { background: #f4f6ff; border-color: #d9e0fb; font-weight: 650; }
+.shell.two { grid-template-columns: 300px minmax(0, 1fr); }
+
+.teaching h3 { margin: 8px 0 0; font-size: 16px; }
+.sitting { background: #f4f6ff; border: 1px solid #d9e0fb; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.sitting-line { margin: 0; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; font-size: 17px; }
+.habit-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pill { border-radius: 999px; border: 1px solid #e6e8ee; background: #fff; padding: 4px 10px; font-size: 13px; }
+.pill.active { background: #eef2ff; border-color: #c7d2fe; }
+.unit-list { display: flex; flex-direction: column; gap: 6px; }
+.unit { display: flex; align-items: center; gap: 10px; text-align: left; background: #fff; border: 1px solid #e6e8ee; border-radius: 12px; padding: 8px 12px; }
+.unit.active { border-color: #4263eb; background: #f4f6ff; }
+.unit.known .unit-title { color: #5c6b7f; }
+.unit-index { width: 22px; color: #5c6b7f; font-variant-numeric: tabular-nums; }
+.unit-title { flex: 1; font-weight: 600; }
+.unit-meta { color: #5c6b7f; font-size: 12px; }
+.teach { border-top: 1px solid #eef0f4; padding-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.cue { background: #fff6e8; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.cue p { margin: 0; }
+.teach-body p { margin: 0 0 10px; white-space: pre-wrap; }
+.example { background: #f7f8fa; border-radius: 10px; padding: 10px 12px; margin: 0; }
+.outline p { margin: 2px 0; color: #5c6b7f; }
+.review-card { border: 1px solid #e6e8ee; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 8px 20px rgba(36, 50, 71, 0.05); }
+.card-face { margin: 0; font-size: 20px; font-weight: 650; }
+.card-back { margin: 0; background: #e8f6ee; border-radius: 10px; padding: 10px 12px; color: #1f7a4d; }
+.misses { display: flex; flex-direction: column; gap: 8px; }
+.miss { border-left: 3px solid #f0c9c9; padding: 6px 10px; background: #fffafa; border-radius: 8px; }
+.miss-prompt { margin: 0; font-weight: 600; }
+.note-text { margin: 0; white-space: pre-wrap; background: #fbfbfc; border: 1px solid #eef0f4; border-radius: 12px; padding: 12px; font-size: 13px; line-height: 1.7; max-height: 340px; overflow: auto; user-select: text; }
+.greeting { margin: 0; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; font-size: 16px; color: #243247; }
+.quiz { border: 1px solid #eef0f4; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.quiz-prompt { margin: 0; font-weight: 600; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(20, 28, 40, 0.35); display: flex; align-items: center; justify-content: center; z-index: 20; }
+.modal { width: min(520px, 92vw); background: #fff; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 24px 60px rgba(20, 28, 40, 0.22); }
+.modal header { display: flex; align-items: center; justify-content: space-between; }
+.modal header h2 { margin: 0; }
+.modal label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #5c6b7f; }
+.modal input { border: 1px solid #e6e8ee; border-radius: 10px; padding: 8px 10px; font-size: 14px; color: #243247; background: #fff; }
+.modal select { border: 1px solid #e6e8ee; border-radius: 10px; padding: 8px 10px; font-size: 14px; color: #243247; background: #fff; }
+.page-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 4px; }
+.readings { display: grid; gap: 10px; margin: 12px 0; }
+.reading { border: 1px solid #e6e8ee; border-radius: 12px; padding: 12px 14px; background: #fbfcff; }
+.reading h4 { margin: 0 0 6px; font-size: 13px; color: #3f4a5f; display: flex; gap: 8px; align-items: center; }
+.reading p { margin: 0; white-space: pre-wrap; line-height: 1.75; color: #243247; }
+.reading.research { border-color: #dfe7f5; background: #f7faff; }
+.reading h5 { margin: 14px 0 6px; font-size: 12px; color: #5a6a83; }
+.sources { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+.sources li { color: #45536a; font-size: 12px; line-height: 1.6; }
+.source-title { display: block; color: #243247; font-weight: 600; }
+.source-site { margin-left: 6px; color: #6c7a90; }
+.source-url { display: block; color: #4a6fa5; word-break: break-all; }
+.source-snippet { display: block; color: #6c7a90; }
+
+@media (max-width: 1080px) {
+  .shell { grid-template-columns: 1fr; }
+  .library, .locator { max-height: 320px; }
+}
+
+/* AI 私教：整份材料 -> 课程设计 -> 逐句讲稿 -> 多轮对话 -> 学习总结 */
+.study { display: flex; flex-direction: column; gap: 14px; min-height: 0; padding: 16px; }
+.study-empty { padding: 24px; }
+.study-head { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
+.study-head h2 { margin: 8px 0 4px; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; font-size: 27px; font-weight: 600; }
+.study-head p { margin: 0; }
+.study-actions { flex-wrap: wrap; justify-content: flex-end; }
+.study-progress { display: flex; gap: 10px; align-items: center; border: 1px solid #cfe6df; background: #f2fbf8; color: #254f47; border-radius: 12px; padding: 10px 14px; }
+.study-progress p { margin: 0; font-size: 13px; }
+.pulse-dot { width: 9px; height: 9px; border-radius: 50%; background: #1f9d80; box-shadow: 0 0 0 5px rgba(31, 157, 128, 0.14); animation: pulse 1.4s infinite; flex: 0 0 auto; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 3px rgba(31,157,128,.16); } 70% { box-shadow: 0 0 0 10px rgba(31,157,128,0); } 100% { box-shadow: 0 0 0 3px rgba(31,157,128,0); } }
+.study-intro { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.study-intro-main { border: 1px solid #e3e9e6; border-radius: 16px; padding: 22px; background: linear-gradient(180deg, #ffffff, #fbfdfc); }
+.study-intro-main h3 { margin: 0 0 8px; font-size: 22px; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; }
+.study-intro-main > p { margin: 0 0 16px; color: #52645e; }
+.study-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.study-steps > div { border: 1px solid #e6ece9; border-radius: 14px; padding: 14px; background: #fff; display: flex; flex-direction: column; gap: 3px; }
+.study-steps b { color: #1f7f6a; font-family: "Iowan Old Style", Palatino, "Songti SC", serif; font-size: 22px; line-height: 1; }
+.study-steps span { font-weight: 650; }
+.study-steps small { color: #5c6b7f; font-size: 12px; line-height: 1.5; }
+.study-habits { border: 1px solid #e6e8ee; border-radius: 16px; padding: 16px; background: #fff; display: flex; flex-direction: column; gap: 10px; }
+.study-habits h3 { margin: 0; font-size: 16px; }
+.study-habits .quiet { margin: 0; }
+.study-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #5c6b7f; }
+.study-field input, .study-field select { border: 1px solid #dfe5e2; border-radius: 9px; padding: 7px 9px; background: #fff; color: #243247; }
+.study-room { display: grid; grid-template-columns: 230px minmax(0, 1fr) 290px; gap: 12px; align-items: start; min-height: 0; }
+.study-outline, .study-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+/* 有课程时整间课堂填满窗口，三栏各自滚动：大纲、讲稿、总览互不抢滚动条。 */
+.study.has-course { flex: 1; min-height: 0; overflow: hidden; gap: 8px; }
+.study.has-course .study-head { flex: 0 0 auto; }
+.study.has-course .study-head h2 { font-size: 22px; margin: 4px 0 2px; }
+.study.has-course .study-room { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+.study.has-course .study-outline,
+.study.has-course .study-side { overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.study.has-course .study-main { overflow: hidden; }
+.study-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+.study.has-course .study-chat { flex: 0 0 clamp(300px, 40%, 460px); min-height: 0; height: auto; }
+/* 有课程时对话区要留给消息本身，这句说明只在首次建课时出现。 */
+.study.has-course .study-chat-head p { display: none; }
+.study.has-course .study-chat-head { padding: 10px 14px 8px; }
+.study.has-course .study-messages { flex: 1; min-height: 0; max-height: none; }
+.study-outline-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.study-outline-title h3, .study-side h3, .study-chat-head h3 { margin: 0; font-size: 15px; }
+.study-unit { border: 1px solid #e4e9e6; background: #fff; border-radius: 12px; padding: 9px 10px; display: flex; gap: 8px; text-align: left; align-items: flex-start; }
+.study-unit:hover { border-color: #b9d9ce; }
+.study-unit.active { border-color: #1f9d80; background: #f1fbf7; }
+.study-unit b { color: #1f7f6a; font-family: "Iowan Old Style", Palatino, "Songti SC", serif; font-size: 17px; line-height: 1.2; }
+.study-unit span { display: flex; flex-direction: column; min-width: 0; font-weight: 600; }
+.study-unit small { color: #6b7b74; font-size: 11px; font-weight: 400; margin-top: 2px; }
+.study-warnings { margin-top: 4px; border-top: 1px dashed #e1e8e4; padding-top: 8px; }
+.study-warnings h4 { margin: 0 0 4px; font-size: 12px; color: #8a5a1a; }
+.study-warnings p { margin: 0; font-size: 11px; color: #7a5a2a; line-height: 1.5; }
+.study-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.study-unit-sheet { border: 1px solid #dfe8e4; border-radius: 16px; padding: 18px; background: #fff; }
+.study-unit-sheet header h3 { margin: 4px 0 2px; font-size: 22px; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; }
+.study-unit-index { color: #1f7f6a; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.study-keypoints { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+.study-keypoints .chip { background: #f1fbf7; border-color: #cfe8df; color: #225e50; }
+.study-segments { display: flex; flex-direction: column; gap: 12px; }
+.study-segment { border-left: 3px solid #b9d9ce; padding: 2px 0 2px 12px; }
+.study-segment blockquote { margin: 0 0 6px; padding: 7px 10px; background: #f7faf8; border-radius: 8px; color: #31473f; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; font-size: 16px; }
+.study-segment p { margin: 0; color: #31413b; line-height: 1.75; }
+.study-check { margin-top: 8px; display: flex; flex-direction: column; gap: 7px; padding: 9px 11px; background: #fffaf1; border: 1px solid #f0e1c8; border-radius: 9px; font-size: 13px; color: #6e5524; }
+.study-check b { white-space: nowrap; color: #9a6a16; }
+.study-check textarea { width: 100%; min-height: 62px; box-sizing: border-box; resize: vertical; font: inherit; line-height: 1.6; color: #3d3220; background: #fff; border: 1px solid #e6d4b4; border-radius: 8px; padding: 7px 9px; }
+.study-check-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.study-chat { border: 1px solid #e4e9e6; border-radius: 16px; background: #fff; display: flex; flex-direction: column; min-height: 320px; }
+.study-chat-head { padding: 14px 16px 8px; border-bottom: 1px solid #f0f3f1; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.study-chat-head > div { min-width: 0; }
+.study-chat-close, .study-chat-toggle { display: none; }
+.study-chat-close { white-space: nowrap; align-self: flex-start; }
+.study-chat-head p { margin: 4px 0 0; }
+.study-messages { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+.study-message { display: flex; flex-direction: column; gap: 3px; max-width: 92%; }
+.study-message.user { align-self: flex-end; align-items: flex-end; }
+.study-message.assistant { align-self: flex-start; }
+.study-message-role { font-size: 11px; color: #7a8983; }
+.study-message p { margin: 0; padding: 9px 12px; border-radius: 12px; line-height: 1.7; white-space: pre-wrap; }
+.study-message.user p { background: #173e3a; color: #f4fffb; }
+.study-message.assistant p { background: #f4f8f6; color: #243247; border: 1px solid #e6eeea; }
+.study-message.pending p { color: #5f726b; font-style: italic; }
+.study-composer { margin-top: auto; border-top: 1px solid #f0f3f1; padding: 9px 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+.study-composer textarea { width: 100%; resize: vertical; min-height: 56px; border: 1px solid #dfe5e2; border-radius: 11px; padding: 8px 11px; font: inherit; color: inherit; background: #fbfcfb; }
+.study-composer textarea:focus { outline: none; border-color: #1f9d80; box-shadow: 0 0 0 3px rgba(31,157,128,.12); }
+.study-composer-side { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.study-side .study-overview, .study-side .study-summary { border: 1px solid #e4e9e6; border-radius: 16px; padding: 14px; background: #fff; }
+.study-usage { border: 1px solid #e4e9e6; border-radius: 16px; padding: 12px 14px; background: #fff; }
+.study-usage p { margin: 6px 0 0; font-size: 12px; color: #3d5049; }
+.study-usage .study-usage-hit { color: #1f7f6a; font-weight: 600; }
+.study-usage .study-usage-hit span { display: block; margin-top: 3px; color: #7a8983; font-weight: 400; }
+.study-overview p { margin: 6px 0 10px; color: #3d5049; line-height: 1.65; font-size: 13px; }
+.study-habit-stamp { border-top: 1px dashed #e2eae6; padding-top: 8px; }
+.study-habit-stamp p { margin: 4px 0 0; font-size: 12px; color: #5f726b; }
+.study-summary { display: flex; flex-direction: column; gap: 8px; }
+.study-summary .quiet { margin: 0; }
+.study-summary-body { display: flex; flex-direction: column; gap: 10px; }
+.study-summary-body > p { margin: 0; font-size: 13px; line-height: 1.65; color: #3d5049; }
+.study-summary-group h4 { margin: 0 0 4px; font-size: 13px; color: #1f7f6a; }
+.study-summary-group ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
+.study-summary-group li { font-size: 12px; color: #3d5049; line-height: 1.55; }
+/* 讲课正文是主阅读区。1300 左右的窗口还挤三栏时，每行只剩十几个字，
+   逐句讲解根本读不下去；这个宽度以下把总览与总结移到正文下方。 */
+@media (max-width: 1440px) {
+  .study-room { grid-template-columns: 200px minmax(0, 1fr); }
+  .study-side { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
+  /* 窄窗时总览/总结是正文下方的一条信息带：固定高度、自己滚动，不能按内容撑高把讲稿挤成 0。 */
+  .study.has-course .study-room { position: relative; grid-template-rows: minmax(0, 1fr) clamp(96px, 14vh, 168px); }
+  .study.has-course .study-side { max-height: none; overflow-y: auto; align-content: start; }
+  /* 阅读讲稿时把对话收进右下角抽屉，讲稿独占整列高度；需要追问时一键展开。 */
+  .study.has-course .study-main { overflow: hidden; }
+  .study.has-course .study-chat {
+    display: none;
+    position: absolute;
+    right: 12px;
+    bottom: 54px;
+    width: min(460px, calc(100% - 24px));
+    height: min(74%, 480px);
+    z-index: 8;
+    box-shadow: 0 18px 48px rgba(24, 40, 36, 0.18);
+  }
+  .study.has-course .study-chat.open { display: flex; }
+  .study-chat-close { display: inline-flex; }
+  .study-chat-toggle {
+    display: inline-flex;
+    position: absolute;
+    right: 14px;
+    bottom: 14px;
+    z-index: 7;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid #cfe0da;
+    background: #173e3a;
+    color: #f4fffb;
+    border-radius: 999px;
+    padding: 9px 16px;
+    font-size: 13px;
+    box-shadow: 0 8px 20px rgba(23, 62, 58, 0.18);
+  }
+}
+@media (max-width: 900px) {
+  .study-intro, .study-room { grid-template-columns: 1fr; }
+  .study-side { grid-template-columns: 1fr; }
+  .study-steps { grid-template-columns: 1fr; }
+  /* 极小窗口先保证能读能问：总览与总结藏起来，对话抽屉占满宽度。 */
+  .study.has-course .study-room { grid-template-rows: minmax(0, 1fr); }
+  .study.has-course .study-side { display: none; }
+  .study.has-course .study-chat { width: calc(100% - 24px); height: min(82%, 520px); }
+}
+
+/* 旧 .stage header 是给页面顶栏用的 flex；讲稿头必须是普通文档流 */
+.stage .study-unit-sheet > header {
+  display: block;
+  padding: 0;
+}
+.stage .study-unit-sheet > header h3 { max-width: 100%; overflow-wrap: anywhere; }
+
+/* 滚动条统一变细变淡，长讲稿滚动时不再又粗又跳。 */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cfd8d4; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #b6c4be; }
+::-webkit-scrollbar-corner { background: transparent; }
