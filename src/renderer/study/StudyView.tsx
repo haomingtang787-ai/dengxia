@@ -71,6 +71,9 @@ export function StudyView({
   const [loading, setLoading] = useState(true)
   // 窄窗里对话改成右下角抽屉：阅读讲稿时不再被聊天区挤掉高度。
   const [chatOpen, setChatOpen] = useState(false)
+  // 侧边栏可收放：大纲、总览/总结都能收起，把宽度让给讲解正文。
+  const [outlineOpen, setOutlineOpen] = useState(true)
+  const [sideOpen, setSideOpen] = useState(true)
   const autoStarted = useRef('')
   // 三个滚动容器：讲稿区、消息区、当前讲次按钮，分别接管自己的滚动。
   const sheetScrollRef = useRef<HTMLDivElement | null>(null)
@@ -323,32 +326,43 @@ export function StudyView({
           </aside>
         </div>
       ) : (
-        <div className="study-room">
-          <aside className="study-outline" ref={outlineRef}>
-            {sessions.length > 1 ? (
-              <label className="study-field">
-                <span>已开的课</span>
-                <select value={detail.sessionId} onChange={(event) => void open(event.target.value)}>
-                  {sessions.map((item) => <option key={item.sessionId} value={item.sessionId}>{item.title}</option>)}
-                </select>
-              </label>
-            ) : null}
-            <div className="study-outline-title">
-              <h3>课程大纲</h3>
-              <span className="chip">{detail.units.length} 讲</span>
-            </div>
-            {detail.units.map((unit) => (
-              <button key={unit.id} className={`study-unit ${activeUnit?.id === unit.id ? 'active' : ''}`} onClick={() => setUnitId(unit.id)}>
-                <b>{String(unit.ordinal + 1).padStart(2, '0')}</b>
-                <span>{unit.title}<small>{unit.source} · {minutesLabel(unit.minutes)}</small></span>
+        <div className={`study-room${outlineOpen ? '' : ' outline-collapsed'}${sideOpen ? '' : ' side-collapsed'}`}>
+          <aside className={`study-outline${outlineOpen ? '' : ' collapsed'}`} ref={outlineRef}>
+            {outlineOpen ? (
+              <>
+                {sessions.length > 1 ? (
+                  <label className="study-field">
+                    <span>已开的课</span>
+                    <select value={detail.sessionId} onChange={(event) => void open(event.target.value)}>
+                      {sessions.map((item) => <option key={item.sessionId} value={item.sessionId}>{item.title}</option>)}
+                    </select>
+                  </label>
+                ) : null}
+                <div className="study-outline-title">
+                  <h3>课程大纲</h3>
+                  <div className="row" style={{ gap: 6 }}>
+                    <span className="chip">{detail.units.length} 讲</span>
+                    <button className="icon-btn" title="收起大纲" onClick={() => setOutlineOpen(false)}>‹</button>
+                  </div>
+                </div>
+                {detail.units.map((unit) => (
+                  <button key={unit.id} className={`study-unit ${activeUnit?.id === unit.id ? 'active' : ''}`} onClick={() => setUnitId(unit.id)}>
+                    <b>{String(unit.ordinal + 1).padStart(2, '0')}</b>
+                    <span>{unit.title}<small>{unit.source} · {minutesLabel(unit.minutes)}</small></span>
+                  </button>
+                ))}
+                {detail.warnings.length ? (
+                  <div className="study-warnings">
+                    <h4>读取提示</h4>
+                    {detail.warnings.slice(0, 4).map((warning) => <p key={warning}>{warning}</p>)}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <button className="study-expand" title="展开大纲" onClick={() => setOutlineOpen(true)}>
+                大纲<small>{detail.units.length}</small>
               </button>
-            ))}
-            {detail.warnings.length ? (
-              <div className="study-warnings">
-                <h4>读取提示</h4>
-                {detail.warnings.slice(0, 4).map((warning) => <p key={warning}>{warning}</p>)}
-              </div>
-            ) : null}
+            )}
           </aside>
 
           <main className="study-main">
@@ -398,32 +412,44 @@ export function StudyView({
             </section>
           </main>
 
-          <aside className="study-side">
-            <section className="study-overview">
-              <h3>整份材料总览</h3>
-              <p>{detail.overview}</p>
-              <div className="study-habit-stamp">
-                <span className="chip">本次习惯</span>
-                <p>{detail.habits.pace === 'slow' ? '讲透' : detail.habits.pace === 'exam' ? '抓考点' : '适中'} · {detail.habits.style === 'define' ? '先定义' : detail.habits.style === 'ask' ? '先提问' : '先比方'} · {detail.habits.minutes} 分钟</p>
-              </div>
-            </section>
-            <UsageCard usage={detail.usage} />
-            <section className="study-summary">
-              <div className="study-outline-title">
-                <h3>学习分析总结</h3>
-                {detail.summary ? <span className="chip">已生成</span> : null}
-              </div>
-              {detail.summary ? (
-                <SummaryView detail={detail} />
-              ) : (
-                <>
-                  <p className="quiet">上完几讲、追问几轮后，再让 AI 根据这次课堂记录写掌握、薄弱、易错和下一步。</p>
-                  <button className="primary" onClick={() => void finishCourse()} disabled={busy !== null}>
-                    {busy === 'finish' ? '正在分析这次学习…' : '生成学习分析总结'}
-                  </button>
-                </>
-              )}
-            </section>
+          <aside className={`study-side${sideOpen ? '' : ' collapsed'}`}>
+            {sideOpen ? (
+              <>
+                <div className="study-side-bar">
+                  <span className="quiet">总览与总结</span>
+                  <button className="icon-btn" title="收起总览" onClick={() => setSideOpen(false)}>›</button>
+                </div>
+                <section className="study-overview">
+                  <h3>整份材料总览</h3>
+                  <p>{detail.overview}</p>
+                  <div className="study-habit-stamp">
+                    <span className="chip">本次习惯</span>
+                    <p>{detail.habits.pace === 'slow' ? '讲透' : detail.habits.pace === 'exam' ? '抓考点' : '适中'} · {detail.habits.style === 'define' ? '先定义' : detail.habits.style === 'ask' ? '先提问' : '先比方'} · {detail.habits.minutes} 分钟</p>
+                  </div>
+                </section>
+                <UsageCard usage={detail.usage} />
+                <section className="study-summary">
+                  <div className="study-outline-title">
+                    <h3>学习分析总结</h3>
+                    {detail.summary ? <span className="chip">已生成</span> : null}
+                  </div>
+                  {detail.summary ? (
+                    <SummaryView detail={detail} />
+                  ) : (
+                    <>
+                      <p className="quiet">上完几讲、追问几轮后，再让 AI 根据这次课堂记录写掌握、薄弱、易错和下一步。</p>
+                      <button className="primary" onClick={() => void finishCourse()} disabled={busy !== null}>
+                        {busy === 'finish' ? '正在分析这次学习…' : '生成学习分析总结'}
+                      </button>
+                    </>
+                  )}
+                </section>
+              </>
+            ) : (
+              <button className="study-expand" title="展开总览与总结" onClick={() => setSideOpen(true)}>
+                摘要<small>{detail.summary ? '已生成' : '未生成'}</small>
+              </button>
+            )}
           </aside>
           <button className="study-chat-toggle" onClick={() => setChatOpen((open) => !open)}>
             课堂对话 · {detail.messages.length}

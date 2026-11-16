@@ -1,19 +1,14 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { ok, type Result } from '../shared/contract'
 import type { AppInfo, UpdateCheckResult } from '../shared/app'
 
-const execFileAsync = promisify(execFile)
-
 /**
  * 应用信息 + 更新检查。
  *
- * 「检查更新」这里只是一个占位实现：你可以在 checkUpdate() 里换成任何更新源
- * （自己的服务器、对象存储、GitHub Release 等）。当前默认做法是——如果设置了
- * 环境变量 DENGXIA_UPDATE_REPO（形如 owner/repo），就用本机已登录的 `gh` 拉最新
- * release 的 tag 对比版本号；没设置就返回「未配置更新源」。
+ * 「检查更新」从 GitHub 网页端拉取最新 release（仓库已公开，无需鉴权）。
+ * 仓库默认是 haomingtang787-ai/dengxia，也可用环境变量 DENGXIA_UPDATE_REPO=owner/repo 覆盖。
+ * 想换成自有服务器 / 对象存储，改 checkUpdate() 里的地址与解析即可。
  *
  * ⚠️ 数据保留约定（每次更新都必须遵守）：
  *  - 更新只替换应用文件（安装目录里的 exe/asar 等），绝不动用户数据目录；
@@ -28,28 +23,25 @@ export class AppInfoService {
 
   async checkUpdate(): Promise<Result<UpdateCheckResult>> {
     const current = app.getVersion()
-    const repo = (process.env.DENGXIA_UPDATE_REPO ?? '').trim()
-
-    if (!repo) {
-      return ok(randomUUID(), {
-        status: 'unconfigured',
-        current,
-        latest: null,
-        url: null,
-        message: '还没配置更新源。设置环境变量 DENGXIA_UPDATE_REPO=owner/repo 后即可通过本机 gh 检查最新 release。',
-      })
-    }
+    const repo = (process.env.DENGXIA_UPDATE_REPO ?? 'haomingtang787-ai/dengxia').trim()
 
     try {
-      // 这里就是「更新方式自己写」的接缝：替换成你自己的获取最新版本号的方式即可。
-      const { stdout } = await execFileAsync(
-        'gh',
-        ['release', 'list', '-R', repo, '-L', '1', '--json', 'tagName,url'],
-        { timeout: 20_000, windowsHide: true },
-      )
-      const list: Array<{ tagName?: string; url?: string }> = JSON.parse(stdout || '[]')
-      const latest = (list[0]?.tagName ?? '').replace(/^v/, '')
-      const url = list[0]?.url ?? null
+      const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+        headers: { 'user-agent': 'dengxia-app', accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(20_000),
+      })
+      if (!response.ok) {
+        return ok(randomUUID(), {
+          status: 'error',
+          current,
+          latest: null,
+          url: null,
+          message: `检查更新失败：GitHub 返回 ${response.status}。`,
+        })
+      }
+      const body = (await response.json()) as { tag_name?: string; html_url?: string }
+      const latest = (body.tag_name ?? '').replace(/^v/, '')
+      const url = body.html_url ?? null
       if (!latest) {
         return ok(randomUUID(), { status: 'up-to-date', current, latest: null, url: null, message: '仓库里还没有 release。' })
       }

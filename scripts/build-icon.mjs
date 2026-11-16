@@ -30,99 +30,63 @@ function drawIcon(size) {
   ctx.fillStyle = bg
   ctx.fill()
 
-  // 光晕（暖色，落在一本摊开的书上）
-  const glow = ctx.createRadialGradient(470 * s, 760 * s, 40 * s, 470 * s, 760 * s, 400 * s)
-  glow.addColorStop(0, 'rgba(255, 210, 128, 0.30)')
+  // 光晕（暖色，在火苗周围）
+  const glow = ctx.createRadialGradient(512 * s, 430 * s, 20 * s, 512 * s, 430 * s, 260 * s)
+  glow.addColorStop(0, 'rgba(255, 210, 128, 0.32)')
   glow.addColorStop(1, 'rgba(255, 210, 128, 0)')
   ctx.fillStyle = glow
   ctx.fillRect(0, 0, size, size)
 
-  // 光锥：从灯泡向左下洒到书页（柔和渐变）
-  const cone = (alpha) => {
+  // 油灯剪影（借鉴用户提供图标的「油灯」造型：火苗 + 灯托 + 灯身 + 底座）
+  const lamp = () => {
+    // 底座（胶囊）
+    const pill = (x, y, w, h, r) => {
+      ctx.beginPath()
+      ctx.moveTo(x + r, y)
+      ctx.arcTo(x + w, y, x + w, y + h, r)
+      ctx.arcTo(x + w, y + h, x, y + h, r)
+      ctx.arcTo(x, y + h, x, y, r)
+      ctx.arcTo(x, y, x + w, y, r)
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.fillStyle = '#efe6d2'
+    pill(444 * s, 740 * s, 136 * s, 52 * s, 26 * s)
+
+    // 灯身（倒置碗形：底部窄、腹部鼓、收口到灯托）
     ctx.beginPath()
-    ctx.moveTo(720 * s, 280 * s)
-    ctx.quadraticCurveTo(560 * s, 640 * s, 300 * s, 820 * s)
-    ctx.lineTo(640 * s, 860 * s)
-    ctx.quadraticCurveTo(660 * s, 620 * s, 790 * s, 300 * s)
+    ctx.moveTo(452 * s, 742 * s)
+    ctx.bezierCurveTo(452 * s, 700 * s, 392 * s, 640 * s, 404 * s, 566 * s)
+    ctx.bezierCurveTo(412 * s, 514 * s, 470 * s, 500 * s, 512 * s, 500 * s)
+    ctx.bezierCurveTo(554 * s, 500 * s, 612 * s, 514 * s, 620 * s, 566 * s)
+    ctx.bezierCurveTo(632 * s, 640 * s, 572 * s, 700 * s, 572 * s, 742 * s)
     ctx.closePath()
-    ctx.fillStyle = `rgba(255, 210, 128, ${alpha})`
+    ctx.fill()
+
+    // 灯托（两端上翘的浅盘）
+    ctx.beginPath()
+    ctx.moveTo(348 * s, 500 * s)
+    ctx.quadraticCurveTo(348 * s, 462 * s, 400 * s, 462 * s)
+    ctx.lineTo(624 * s, 462 * s)
+    ctx.quadraticCurveTo(676 * s, 462 * s, 676 * s, 500 * s)
+    ctx.lineTo(654 * s, 500 * s)
+    ctx.quadraticCurveTo(512 * s, 486 * s, 370 * s, 500 * s)
+    ctx.closePath()
     ctx.fill()
   }
-  cone(0.10)
-  cone(0.15)
+  lamp()
 
-  // 摇臂：从右上角墙面伸出的两段灯臂
-  ctx.strokeStyle = '#e9f2ee'
-  ctx.lineWidth = 30 * s
-  ctx.lineCap = 'round'
+  // 火苗（暖黄泪滴）
+  const flame = ctx.createLinearGradient(512 * s, 300 * s, 512 * s, 480 * s)
+  flame.addColorStop(0, '#ffd27a')
+  flame.addColorStop(1, '#ff9d3c')
+  ctx.fillStyle = flame
   ctx.beginPath()
-  ctx.moveTo(900 * s, 120 * s)
-  ctx.lineTo(820 * s, 220 * s)
-  ctx.stroke()
-  ctx.beginPath()
-  ctx.moveTo(820 * s, 220 * s)
-  ctx.lineTo(720 * s, 300 * s)
-  ctx.stroke()
-  // 墙面安装点
-  ctx.fillStyle = '#e9f2ee'
-  ctx.beginPath()
-  ctx.arc(900 * s, 120 * s, 26 * s, 0, Math.PI * 2)
-  ctx.fill()
-
-  // 灯头（灯罩，灯泡朝左下）
-  ctx.beginPath()
-  ctx.moveTo(660 * s, 200 * s)
-  ctx.lineTo(824 * s, 250 * s)
-  ctx.lineTo(772 * s, 340 * s)
-  ctx.lineTo(612 * s, 288 * s)
+  ctx.moveTo(512 * s, 282 * s)
+  ctx.bezierCurveTo(548 * s, 372 * s, 546 * s, 442 * s, 512 * s, 462 * s)
+  ctx.bezierCurveTo(478 * s, 442 * s, 476 * s, 372 * s, 512 * s, 282 * s)
   ctx.closePath()
-  ctx.fillStyle = '#e9f2ee'
   ctx.fill()
-
-  // 灯泡
-  const bulb = ctx.createRadialGradient(716 * s, 274 * s, 6 * s, 716 * s, 274 * s, 40 * s)
-  bulb.addColorStop(0, '#fff3d6')
-  bulb.addColorStop(1, '#ffb84d')
-  ctx.fillStyle = bulb
-  ctx.beginPath()
-  ctx.arc(716 * s, 274 * s, 34 * s, 0, Math.PI * 2)
-  ctx.fill()
-
-  // 摊开的书（左下，稍小）
-  const page = (x1, y1, x2, y2, x3, y3, x4, y4, fill) => {
-    ctx.beginPath()
-    ctx.moveTo(x1, y1)
-    ctx.lineTo(x2, y2)
-    ctx.lineTo(x3, y3)
-    ctx.lineTo(x4, y4)
-    ctx.closePath()
-    ctx.fillStyle = fill
-    ctx.fill()
-  }
-  page(440 * s, 820 * s, 250 * s, 872 * s, 250 * s, 736 * s, 440 * s, 782 * s, '#f7f1e3')
-  page(440 * s, 820 * s, 640 * s, 872 * s, 640 * s, 736 * s, 440 * s, 782 * s, '#efe6d2')
-  ctx.strokeStyle = '#d9c9a8'
-  ctx.lineWidth = 6 * s
-  ctx.beginPath()
-  ctx.moveTo(440 * s, 782 * s)
-  ctx.lineTo(440 * s, 820 * s)
-  ctx.stroke()
-
-  // 书页上的文字横线
-  ctx.strokeStyle = 'rgba(120, 100, 70, 0.35)'
-  ctx.lineWidth = 7 * s
-  ctx.lineCap = 'round'
-  for (let i = 0; i < 3; i += 1) {
-    const y = (752 + i * 22) * s
-    ctx.beginPath()
-    ctx.moveTo(300 * s, y)
-    ctx.lineTo(396 * s, y)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(486 * s, y)
-    ctx.lineTo(584 * s, y)
-    ctx.stroke()
-  }
 
   return canvas
 }

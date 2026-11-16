@@ -378,6 +378,27 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
       })()`,
     )
     console.log('[smoke] 滚动结构', JSON.stringify(scrollState))
+    // 验证侧边栏可收放：大纲与总览都能收起/展开。
+    const collapseProbe = await win.webContents.executeJavaScript(
+      `(async () => {
+        const room = document.querySelector('.study-room');
+        const snap = () => room ? { cls: room.className, cols: getComputedStyle(room).gridTemplateColumns } : null;
+        const wait = () => new Promise((r) => setTimeout(r, 150));
+        const before = snap();
+        document.querySelector('.study-outline .icon-btn')?.click();
+        await wait();
+        const afterOutline = snap();
+        document.querySelector('.study-side .icon-btn')?.click();
+        await wait();
+        const afterSide = snap();
+        const expandCount = document.querySelectorAll('.study-expand').length;
+        document.querySelector('.study-outline .study-expand')?.click();
+        document.querySelector('.study-side .study-expand')?.click();
+        await wait();
+        return { before, afterOutline, afterSide, expandCount, restored: snap() };
+      })()`,
+    )
+    console.log('[smoke] 侧栏收放', JSON.stringify(collapseProbe))
     await win.webContents.executeJavaScript(
       `document.querySelector('.study-room')?.scrollIntoView({ block: 'start' })`,
     )
