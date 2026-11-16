@@ -9,6 +9,7 @@ import type { AiService } from '../src/ai/service'
 import type { DocumentService } from '../src/documents/service'
 import type { ImageService } from '../src/images/service'
 import type { StudyService } from '../src/study/service'
+import type { TeacherService } from '../src/teaching/teacherService'
 import type { TeachingService } from '../src/teaching/service'
 import type { AppInfoService } from '../src/app/info'
 import { registerIpc } from '../src/main/ipc'
@@ -27,7 +28,7 @@ function fakeIpc(): { ipc: IpcMain; handlers: Map<string, (event: unknown, body:
 describe('IPC 装配', () => {
   it('每个声明的 invoke 通道都真的绑了处理函数', () => {
     const { ipc, handlers } = fakeIpc()
-    const returned = registerIpc(ipc, {} as DocumentService, {} as TeachingService, {} as AiService, {} as ImageService, {} as StudyService, {} as AppInfoService)
+    const returned = registerIpc(ipc, {} as DocumentService, {} as TeachingService, {} as AiService, {} as ImageService, {} as StudyService, {} as TeacherService, {} as AppInfoService)
     expect(returned).toEqual([...IPC_INVOKE_CHANNELS])
     for (const channel of IPC_INVOKE_CHANNELS) {
       expect(typeof handlers.get(channel), channel).toBe('function')
@@ -38,7 +39,7 @@ describe('IPC 装配', () => {
     const { ipc, handlers } = fakeIpc()
     const list = vi.fn(() => ({ ok: true as const, requestId: 'r', data: { items: [] } }))
     const teaching = { list } as unknown as TeachingService
-    registerIpc(ipc, {} as DocumentService, teaching, {} as AiService, {} as ImageService, {} as StudyService, {} as AppInfoService)
+    registerIpc(ipc, {} as DocumentService, teaching, {} as AiService, {} as ImageService, {} as StudyService, {} as TeacherService, {} as AppInfoService)
     const handler = handlers.get(IpcChannel.teachingLecturesList)
     expect(handler).toBeDefined()
     const result = await handler?.({} as IpcMainInvokeEvent, {})
@@ -50,7 +51,7 @@ describe('IPC 装配', () => {
     const { ipc, handlers } = fakeIpc()
     const status = vi.fn(() => ({ ok: true as const, requestId: 'r', data: { configured: false, baseUrl: '', model: '', hasKey: false } }))
     const ai = { status } as unknown as AiService
-    registerIpc(ipc, {} as DocumentService, {} as TeachingService, ai, {} as ImageService, {} as StudyService, {} as AppInfoService)
+    registerIpc(ipc, {} as DocumentService, {} as TeachingService, ai, {} as ImageService, {} as StudyService, {} as TeacherService, {} as AppInfoService)
     const result = await handlers.get(IpcChannel.aiStatus)?.({} as IpcMainInvokeEvent, {})
     expect(status).toHaveBeenCalledTimes(1)
     expect(result).toMatchObject({ ok: true, data: { hasKey: false } })

@@ -17,6 +17,7 @@ export type StudySessionRow = {
   material_chunks: number
   status: StudyStatus
   summary_json: string
+  teacher_snapshot_json: string
   created_at: string
   updated_at: string
 }
@@ -73,8 +74,9 @@ export class StudyStore {
       this.db.run(
         `INSERT INTO study_sessions(
           id, request_id, document_version_id, title, subject, source_name, overview, outline_json,
-          habits_json, warnings_json, truncated, material_chars, material_chunks, status, summary_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          habits_json, warnings_json, truncated, material_chars, material_chunks, status, summary_json,
+          teacher_snapshot_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         bundle.session.id,
         bundle.session.request_id,
         bundle.session.document_version_id,
@@ -90,6 +92,7 @@ export class StudyStore {
         bundle.session.material_chunks,
         bundle.session.status,
         bundle.session.summary_json,
+        bundle.session.teacher_snapshot_json,
         bundle.session.created_at,
         bundle.session.updated_at,
       )

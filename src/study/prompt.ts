@@ -1,6 +1,7 @@
 import type { Habits } from '../teaching/habits'
 import { habitBrief } from '../teaching/habits'
 import type { StudyCheck, StudyMessage, StudySummary, StudyUnit } from '../shared/study'
+import type { TeacherPromptContext } from '../shared/teacher'
 
 const PLAN_SYSTEM = [
   '你是「灯下」的课程设计师，也是一位会当面讲课的私教。',
@@ -40,11 +41,42 @@ const SUMMARY_SYSTEM = [
   '每个数组 2 到 6 条，每条一句话，不要空泛。',
 ].join('\n')
 
+const NOTE_SYSTEM = [
+  '你是学生的老师。下课时，你要写一份只属于这次课堂的老师手记，留给下一次的自己看。',
+  '只依据本次课堂的讲解、学生作答和对话，不要编造学生没有表现出来的掌握情况。',
+  '只输出一个 JSON 对象，不要 markdown 代码块，不要解释。',
+  '字段：summary, worked[], stuck[], next[]。',
+  'summary 用 80 到 160 字说明这次课到底学到了哪里。',
+  'worked 写这次真正讲通、学生能复述的内容；stuck 写仍然卡住、含糊或答错的地方；next 写下一次课最该先做什么。',
+  '每个数组 1 到 5 条，每条一句话，具体到知识点或动作。',
+].join('\n')
+
+/** 老师人格与档案的简短注入，控制在 400 字以内。 */
+export function teacherBrief(teacher: TeacherPromptContext): string {
+  const profile = teacher.profile
+  const subjects = profile.subjects.length ? profile.subjects.join('、') : '未填'
+  const lines = [
+    `你的名字是「${teacher.name}」。学生可以改称呼，但人格是同一套。`,
+    `你的语气：${teacher.tone}。你不替学生思考，先问清他卡在哪，再讲。`,
+    `学生目标：${profile.goal || '未填'}；当前水平：${profile.level || '未填'}；学科：${subjects}。`,
+    profile.weeklyMinutes > 0 ? `每周可投入约 ${profile.weeklyMinutes} 分钟。` : '',
+    profile.notes ? `学生补充：${profile.notes}` : '',
+    teacher.boundaries.length ? `边界：${teacher.boundaries.join('；')}` : '',
+    teacher.memories.length
+      ? `你记得（按可信度排序，未确认的先用“我观察到……”说出来再请学生确认）：\n${teacher.memories
+          .map((memory) => `- [${memory.userConfirmed ? '已确认' : '观察'}] ${memory.kind}：${memory.statement}`)
+          .join('\n')}`
+      : '你还没有关于这个学生的长期记忆；这次课后要记下真正有用的观察。',
+  ]
+  return lines.filter(Boolean).join('\n')
+}
+
 export function buildStudyPlanPrompt(input: {
   title: string
   subject: string
   material: string
   habits: Habits
+  teacher?: TeacherPromptContext
   truncated: boolean
   digests?: string
   chunkCount?: number
@@ -52,6 +84,7 @@ export function buildStudyPlanPrompt(input: {
 }): { system: string; user: string } {
   const chunked = Boolean(input.digests && input.chunkCount && input.chunkCount > 1)
   const user = [
+    input.teacher ? teacherBrief(input.teacher) : '',
     habitBrief(input.habits),
     `材料：${input.title}${input.subject ? `；科目：${input.subject}` : ''}`,
     chunked
@@ -77,7 +110,12 @@ export function buildStudyChatPrompt(input: {
   messages: StudyMessage[]
   question: string
   habits: Habits
+  teacher?: TeacherPromptContext
 }): { system: string; user: string } {
+  const teacherSystem = input.teacher
+    ? `你的名字是「${input.teacher.name}」。保持同一个人格：${input.teacher.tone}。不要因为换了学科就变成另一个人。`
+    : ''
+  const system = teacherSystem ? `${CHAT_SYSTEM}\n\n${teacherSystem}` : CHAT_SYSTEM
   const unitText = input.unit
     ? [
         `当前小讲：第 ${input.unit.ordinal + 1} 讲《${input.unit.title}》（${input.unit.source}）`,
@@ -104,6 +142,7 @@ export function buildStudyChatPrompt(input: {
     index.push(line)
   }
   const user = [
+    input.teacher ? teacherBrief(input.teacher) : '',
     habitBrief(input.habits),
     `课程总览：${input.overview}`,
     `课程大纲：${input.outline.map((item, index) => `${index + 1}. ${item}`).join('；')}`,
@@ -115,7 +154,7 @@ export function buildStudyChatPrompt(input: {
   ]
     .filter(Boolean)
     .join('\n\n')
-  return { system: CHAT_SYSTEM, user }
+  return { system, user }
 }
 
 export function buildStudySummaryPrompt(input: {
@@ -145,6 +184,37 @@ export function buildStudySummaryPrompt(input: {
     '请写这次学习的分析总结。判断掌握程度时优先依据学生的实际作答：答得含糊的写进 weak，答错或混概念的写进 pitfalls；没有作答证据的内容不要写成已掌握。',
   ].join('\n\n')
   return { system: SUMMARY_SYSTEM, user }
+}
+
+export function buildTeacherNotePrompt(input: {
+  teacherName: string
+  title: string
+  overview: string
+  units: StudyUnit[]
+  messages: StudyMessage[]
+  checks: StudyCheck[]
+}): { system: string; user: string } {
+  const answers = input.checks
+    .slice(0, 40)
+    .map((check) => {
+      const unit = input.units.find((item) => item.ordinal === check.unitOrdinal)
+      return `第 ${check.unitOrdinal + 1} 讲《${unit?.title ?? ''}》\n问：${check.question}\n学生答：${check.answer}`
+    })
+    .join('\n\n')
+  const transcript = input.messages
+    .slice(-40)
+    .map((message) => `${message.role === 'user' ? '学生' : '老师'}：${message.content}`)
+    .join('\n')
+  const user = [
+    `你的名字：${input.teacherName}`,
+    `课程：${input.title}`,
+    `课程总览：${input.overview}`,
+    `课程大纲：${input.units.map((unit, index) => `${index + 1}. ${unit.title}`).join('；')}`,
+    answers ? `学生这次的实际作答：\n${answers}` : '学生这次没有留下作答。没有作答证据的内容不要写成已掌握。',
+    `这次课堂对话：\n${transcript || '学生这次没有提问。'}`,
+    '请写下一次课真正用得上的四段式老师手记。',
+  ].join('\n\n')
+  return { system: NOTE_SYSTEM, user }
 }
 
 export function mergeOpening(opening: string, units: StudyUnit[]): string {

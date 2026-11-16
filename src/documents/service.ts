@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { ArgumentError, parseBlocksQuery, parseImportBody, parseJobIdBody, parseLocator, parsePagination, parsePinBody, parseRenameBody, parseRetryBody, parseReviewSettings, parseVersionBody } from '../domain/validation'
 import { canRetryJob, isTerminalJob } from '../domain/jobs'
 import { nowIso } from '../domain/ids'
@@ -212,12 +213,15 @@ export class DocumentService {
       const limit = typeof raw.limit === 'number' && Number.isInteger(raw.limit)
         ? Math.max(1, Math.min(50, raw.limit))
         : 20
+      const offset = typeof raw.offset === 'number' && Number.isInteger(raw.offset)
+        ? Math.max(0, Math.min(10_000, raw.offset))
+        : 0
       const ftsQuery = buildFtsQuery(query)
       if (!ftsQuery) return ok(requestId, { items: [], total: 0, query })
-      const rows = this.store.searchBlocks(ftsQuery, limit)
+      const rows = this.store.searchBlocks(ftsQuery, limit, offset)
       return ok(requestId, {
         query,
-        total: rows.length,
+        total: this.store.countSearchBlocks(ftsQuery),
         items: rows.map((row) => ({
           documentId: row.document_id,
           documentVersionId: row.document_version_id,
@@ -322,6 +326,23 @@ export class DocumentService {
     color: string
     created_at: string
   }): HighlightView {
+    const block = this.store.block(row.block_id)
+    let valid = true
+    let reason: HighlightView['reason'] = null
+    if (!block || block.document_version_id !== row.document_version_id) {
+      valid = false
+      reason = 'block_missing'
+    } else if (
+      row.start_offset < 0 ||
+      row.end_offset <= row.start_offset ||
+      row.end_offset > block.text.length
+    ) {
+      valid = false
+      reason = 'offset_out_of_range'
+    } else if (block.text.slice(row.start_offset, row.end_offset) !== row.quote) {
+      valid = false
+      reason = 'quote_changed'
+    }
     return {
       id: row.id,
       documentVersionId: row.document_version_id,
@@ -332,6 +353,25 @@ export class DocumentService {
       quote: row.quote,
       color: row.color,
       createdAt: row.created_at,
+      valid,
+      reason,
+    }
+  }
+
+  /** 只清理当前版本已失效的高亮；不改有效高亮，也不跨版本猜测迁移。 */
+  cleanupHighlights(body: unknown): Result<{ deleted: number }> {
+    const requestId = randomUUID()
+    try {
+      const parsed = parseVersionBody(body)
+      const version = this.store.getVersion(parsed.documentVersionId)
+      if (!version) return fail(requestId, 'NOT_FOUND', '没有这份文稿。')
+      let deleted = 0
+      for (const row of this.store.listHighlights(parsed.documentVersionId)) {
+        if (!this.highlightView(row).valid && this.store.deleteHighlight(row.id)) deleted += 1
+      }
+      return ok(requestId, { deleted })
+    } catch (error) {
+      return this.asFailure(requestId, error)
     }
   }
 
@@ -449,7 +489,13 @@ export class DocumentService {
         await fs.promises.cp(source, path.join(destination, name), { recursive: true })
       }
     }
+    const database = await hashFile(databaseFile)
+    if (!sqliteIntegrityOk(databaseFile)) {
+      throw new ArgumentError('备份生成的 library.sqlite 未通过完整性检查。')
+    }
     const counts = this.store.stats()
+    // manifest 自身不计入 payload；恢复时用“排除 manifest”的文件数/字节数复核。
+    const payload = walkDirectory(destination)
     const manifest = {
       product: '灯下',
       version: this.options.version?.() ?? 'unknown',
@@ -463,6 +509,13 @@ export class DocumentService {
         highlights: counts.highlights,
         misses: counts.misses,
       },
+      database: {
+        sha256: database.sha256,
+        sizeBytes: database.sizeBytes,
+        integrity: 'ok',
+      },
+      files: payload.files,
+      bytes: payload.bytes,
       note: '备份不含 settings.json（模型 API Key 留在本机）；恢复时用应用里的「从备份恢复」。',
     }
     await fs.promises.writeFile(path.join(destination, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8')
@@ -524,13 +577,13 @@ export class DocumentService {
     try {
       const chosen = await this.options.dialogs.pickDirectory?.(windowId, '选择要恢复的灯下备份文件夹')
       if (!chosen) return fail(requestId, 'CONFLICT', '没有选择备份文件夹。')
-      return ok(requestId, this.readRestorePreview(chosen))
+      return ok(requestId, await this.readRestorePreview(chosen))
     } catch (error) {
       return this.asFailure(requestId, error)
     }
   }
 
-  private readRestorePreview(source: string): RestorePreview {
+  private async readRestorePreview(source: string): Promise<RestorePreview> {
     const manifestFile = path.join(source, 'manifest.json')
     const databaseFile = path.join(source, 'library.sqlite')
     if (!fs.existsSync(manifestFile) || !fs.existsSync(databaseFile)) {
@@ -542,6 +595,9 @@ export class DocumentService {
       createdAt?: unknown
       schemaVersion?: unknown
       counts?: Record<string, unknown>
+      database?: { sha256?: unknown; sizeBytes?: unknown; integrity?: unknown }
+      files?: unknown
+      bytes?: unknown
     }
     try {
       manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8')) as typeof manifest
@@ -549,6 +605,38 @@ export class DocumentService {
       throw new ArgumentError('备份的 manifest.json 读不出来。')
     }
     if (manifest.product !== '灯下') throw new ArgumentError('这不是灯下生成的备份。')
+
+    const actualDatabase = await hashFile(databaseFile)
+    const manifestSha = typeof manifest.database?.sha256 === 'string' ? manifest.database.sha256 : ''
+    const hasIntegrity = /^[a-f0-9]{64}$/i.test(manifestSha)
+    if (hasIntegrity) {
+      if (manifestSha.toLowerCase() !== actualDatabase.sha256.toLowerCase()) {
+        throw new ArgumentError('备份的 library.sqlite 校验失败，可能已损坏；没有覆盖当前文库。')
+      }
+      if (typeof manifest.database?.sizeBytes === 'number' && manifest.database.sizeBytes !== actualDatabase.sizeBytes) {
+        throw new ArgumentError('备份的 library.sqlite 大小与 manifest 不一致；没有覆盖当前文库。')
+      }
+      if (manifest.database?.integrity !== 'ok') {
+        throw new ArgumentError('备份的 manifest 没有记录数据库完整性；没有覆盖当前文库。')
+      }
+    }
+    if (!sqliteIntegrityOk(databaseFile)) {
+      throw new ArgumentError('备份的 library.sqlite 没有通过 SQLite 完整性检查；没有覆盖当前文库。')
+    }
+
+    if (typeof manifest.files === 'number' || typeof manifest.bytes === 'number') {
+      const actual = walkDirectory(source)
+      const manifestBytes = fs.statSync(manifestFile).size
+      const payloadFiles = Math.max(0, actual.files - 1)
+      const payloadBytes = Math.max(0, actual.bytes - manifestBytes)
+      if (typeof manifest.files === 'number' && manifest.files !== payloadFiles) {
+        throw new ArgumentError('备份的文件数和 manifest 不一致；没有覆盖当前文库。')
+      }
+      if (typeof manifest.bytes === 'number' && manifest.bytes !== payloadBytes) {
+        throw new ArgumentError('备份的文件大小和 manifest 不一致；没有覆盖当前文库。')
+      }
+    }
+
     const token = randomUUID()
     this.restoreTokens.set(token, source)
     if (this.restoreTokens.size > 12) this.restoreTokens.delete(this.restoreTokens.keys().next().value as string)
@@ -560,6 +648,8 @@ export class DocumentService {
       version: typeof manifest.version === 'string' ? manifest.version : 'unknown',
       createdAt: typeof manifest.createdAt === 'string' ? manifest.createdAt : '',
       schemaVersion: number(manifest.schemaVersion),
+      verification: hasIntegrity ? 'sha256' : 'legacy',
+      databaseSha256: hasIntegrity ? actualDatabase.sha256 : null,
       counts: {
         documents: number(counts.documents),
         pages: number(counts.pages),
@@ -580,7 +670,7 @@ export class DocumentService {
       if (typeof token !== 'string' || !token) throw new ArgumentError('缺少恢复确认 token。')
       const source = this.restoreTokens.get(token)
       if (!source) throw new ArgumentError('恢复确认已过期，请重新选择备份。')
-      const preview = this.readRestorePreview(source)
+      const preview = await this.readRestorePreview(source)
       const staging = `${this.options.root}.restore-${token.slice(0, 8)}`
       const previous = `${this.options.root}.before-restore-${backupStamp(new Date())}`
       await fs.promises.rm(staging, { recursive: true, force: true })
@@ -658,6 +748,13 @@ export class DocumentService {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
     const used = this.store.tokensSince(monthStart.toISOString())
+    const estimatedCalls = Number(
+      this.options.db.get<{ total: number }>(
+        `SELECT COUNT(*) AS total FROM ai_usage
+         WHERE created_at >= ? AND prompt_tokens = 0 AND cached_tokens = 0 AND completion_tokens = 0`,
+        monthStart.toISOString(),
+      )?.total ?? 0,
+    )
     const percent = limit > 0 ? Math.min(100, Math.round((used / limit) * 1000) / 10) : 0
     return {
       limit,
@@ -669,6 +766,8 @@ export class DocumentService {
       hardStop,
       exceeded: limit > 0 && used >= limit,
       warned: limit > 0 && used / limit >= 0.8,
+      estimatedCalls,
+      estimated: estimatedCalls > 0,
     }
   }
 
@@ -1578,6 +1677,23 @@ function walkDirectory(rootDir: string): { bytes: number; files: number } {
     }
   }
   return { bytes, files }
+}
+
+function sqliteIntegrityOk(file: string): boolean {
+  let db: DatabaseSync | null = null
+  try {
+    db = new DatabaseSync(file, { readOnly: true })
+    const row = db.prepare('PRAGMA integrity_check').get() as { integrity_check?: unknown } | undefined
+    return row?.integrity_check === 'ok'
+  } catch {
+    return false
+  } finally {
+    try {
+      db?.close()
+    } catch {
+      /* 打不开或已关闭都不影响结论。 */
+    }
+  }
 }
 
 function backupStamp(date: Date): string {

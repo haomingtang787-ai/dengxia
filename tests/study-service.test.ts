@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SettingsStore } from '../src/providers/settings'
 import { AppDatabase } from '../src/storage/database'
 import { migrate } from '../src/storage/migrate'
+import { TeacherService } from '../src/teaching/teacherService'
 
 const DOC_ID = randomUUID()
 const VERSION_ID = randomUUID()
@@ -75,14 +76,22 @@ const SUMMARY = {
   next: ['补上 O2 与配平'],
 }
 
+const NOTE = {
+  summary: '这次课讲通了场所，但反应式还没配平。',
+  worked: ['叶绿体是光合作用的场所'],
+  stuck: ['反应式还不完整'],
+  next: ['下次先补 O2 与配平'],
+}
+
 function configuredService(fetchImpl: typeof fetch, habits = {
   name: '小明', pace: 'slow' as const, style: 'define' as const, minutes: 25 as const, window: 'evening' as const, avoid: 'long' as const,
-}) {
+}, teacher?: TeacherService) {
   return import('../src/study/service').then(({ StudyService }) =>
     new StudyService({
       db,
       settings,
       habits: () => habits,
+      teacher,
       images: {
         vision: vi.fn(async () => ({
           ok: true as const,
@@ -128,6 +137,12 @@ function fakeFetch() {
     }
     if (system.includes('学习分析')) {
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(SUMMARY) } }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    if (system.includes('老师手记')) {
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(NOTE) } }] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       })
@@ -212,6 +227,83 @@ describe('AI 私教学习会话', () => {
     const summaryCall = JSON.parse(String((fetchImpl.mock.calls.at(-1)?.[1] as RequestInit).body))
     expect(summaryCall.messages[0].content).toContain('学习分析')
     expect(summaryCall.messages[1].content).toContain('我还是不懂')
+  })
+
+  it('老师人格、档案和相关记忆进入开课/追问提示，下课时写入老师手记', async () => {
+    configure()
+    const fetchImpl = fakeFetch()
+    const teacher = new TeacherService({ db, now: () => Date.parse('2026-11-17T10:00:00.000Z') })
+    teacher.savePersona({ name: '周老师', pronoun: 'she', tone: 'warm-rigorous', boundaries: ['不替我思考'] })
+    teacher.saveProfile({
+      goal: '考试', level: '学过但忘', subjects: ['生物'], weeklyMinutes: 300, notes: '先给例子，再给定义',
+    })
+    teacher.memorySave({
+      kind: 'misconception',
+      subject: '生物',
+      concept: '叶绿体',
+      statement: '容易把叶绿体和叶绿素混为一谈',
+      evidence: '上次课把色素说成场所',
+      confidence: 0.9,
+      userConfirmed: true,
+    })
+    const service = await configuredService(
+      fetchImpl as unknown as typeof fetch,
+      { name: '小明', pace: 'slow', style: 'define', minutes: 25, window: 'evening', avoid: 'long' },
+      teacher,
+    )
+    const created = await service.create({ requestId: randomUUID(), documentVersionId: VERSION_ID, title: '光合作用课件' })
+    expect(created.ok).toBe(true)
+    const sessionId = created.ok ? created.data.sessionId : ''
+
+    const planCall = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body))
+    expect(planCall.messages[1].content).toContain('周老师')
+    expect(planCall.messages[1].content).toContain('容易把叶绿体和叶绿素混为一谈')
+    expect(planCall.messages[1].content).toContain('先给例子，再给定义')
+
+    await service.send({ sessionId, content: '叶绿素和叶绿体有什么区别？', unitOrdinal: 0 })
+    const chatCall = JSON.parse(String((fetchImpl.mock.calls[1][1] as RequestInit).body))
+    expect(chatCall.messages[0].content).toContain('周老师')
+    expect(chatCall.messages[1].content).toContain('容易把叶绿体和叶绿素混为一谈')
+
+    const finished = await service.finish({ sessionId })
+    expect(finished.ok).toBe(true)
+    if (finished.ok) {
+      expect(finished.data.summary?.mastered).toContain('叶绿体是场所')
+      expect(finished.data.teacherNote?.summary).toContain('反应式')
+      expect(finished.data.teacherNote?.stuck).toContain('反应式还不完整')
+    }
+    const noteCall = JSON.parse(String((fetchImpl.mock.calls.at(-1)?.[1] as RequestInit).body))
+    expect(noteCall.messages[0].content).toContain('老师手记')
+    expect(noteCall.messages[1].content).toContain('光合作用')
+    const snapshot = db.get<{ teacher_snapshot_json: string }>(
+      'SELECT teacher_snapshot_json FROM study_sessions WHERE id = ?',
+      sessionId,
+    )
+    expect(snapshot?.teacher_snapshot_json).toContain('周老师')
+  })
+
+  it('老师手记生成失败不阻断学习总结', async () => {
+    configure()
+    const base = fakeFetch()
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      const system = String(body.messages?.[0]?.content ?? '')
+      if (system.includes('老师手记')) throw new Error('note model down')
+      return base(url, init)
+    })
+    const teacher = new TeacherService({ db })
+    const service = await configuredService(fetchImpl as unknown as typeof fetch, undefined, teacher)
+    const created = await service.create({ requestId: randomUUID(), documentVersionId: VERSION_ID, title: '光合作用课件' })
+    expect(created.ok).toBe(true)
+    const sessionId = created.ok ? created.data.sessionId : ''
+    const finished = await service.finish({ sessionId })
+
+    expect(finished.ok).toBe(true)
+    if (finished.ok) {
+      expect(finished.data.summary?.mastered).toContain('叶绿体是场所')
+      expect(finished.data.teacherNote).toBeNull()
+    }
+    expect(db.get<{ max: number }>('SELECT MAX(version) AS max FROM schema_migrations')?.max).toBe(11)
   })
 
   it('同一 requestId 重复创建不会再调用模型', async () => {

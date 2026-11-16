@@ -406,7 +406,7 @@ function backfillSearch(db: AppDatabase): void {
 }
 
 /** 恢复旧备份时用它判断备份 schema 是否比当前应用新。 */
-export const CURRENT_SCHEMA_VERSION = 10
+export const CURRENT_SCHEMA_VERSION = 11
 
 const COST_SCHEMA = `
 CREATE TABLE material_digests (
@@ -432,6 +432,60 @@ CREATE TABLE ai_usage (
 
 CREATE INDEX idx_ai_usage_session ON ai_usage(session_id);
 CREATE INDEX idx_ai_usage_version ON ai_usage(document_version_id);
+`
+
+const TEACHER_SCHEMA = `
+CREATE TABLE teacher_persona (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  name TEXT NOT NULL DEFAULT '老师',
+  pronoun TEXT NOT NULL DEFAULT 'she',
+  tone TEXT NOT NULL DEFAULT 'warm-rigorous',
+  boundaries_json TEXT NOT NULL DEFAULT '[]',
+  version INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE learner_profile (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  goal TEXT NOT NULL DEFAULT '',
+  level TEXT NOT NULL DEFAULT '',
+  subjects_json TEXT NOT NULL DEFAULT '[]',
+  exam_date TEXT NULL,
+  weekly_minutes INTEGER NOT NULL DEFAULT 0,
+  notes TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE teacher_memory (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('goal','mastery','misconception','preference','strategy','constraint')),
+  subject TEXT NOT NULL DEFAULT '',
+  concept TEXT NOT NULL DEFAULT '',
+  statement TEXT NOT NULL,
+  evidence TEXT NOT NULL,
+  confidence REAL NOT NULL DEFAULT 0.5,
+  source_session_id TEXT NULL REFERENCES study_sessions(id) ON DELETE SET NULL,
+  source_document_version_id TEXT NULL REFERENCES document_versions(id) ON DELETE SET NULL,
+  user_confirmed INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','archived')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_teacher_memory_status ON teacher_memory(status, updated_at DESC);
+CREATE INDEX idx_teacher_memory_subject ON teacher_memory(subject, concept);
+
+CREATE TABLE teacher_notes (
+  session_id TEXT PRIMARY KEY REFERENCES study_sessions(id) ON DELETE CASCADE,
+  summary TEXT NOT NULL,
+  worked_json TEXT NOT NULL DEFAULT '[]',
+  stuck_json TEXT NOT NULL DEFAULT '[]',
+  next_json TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+
+ALTER TABLE study_sessions ADD COLUMN teacher_snapshot_json TEXT NOT NULL DEFAULT '';
 `
 
 function hasVersion(db: AppDatabase, version: number): boolean {  return Boolean(db.get<{ version: number }>('SELECT version FROM schema_migrations WHERE version = ?', version))
@@ -507,6 +561,24 @@ export function migrate(db: AppDatabase): void {
       db.exec(SEARCH_SCHEMA)
       backfillSearch(db)
       db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 10, nowIso())
+    })
+  }
+  if (!hasVersion(db, 11)) {
+    db.transaction(() => {
+      // 0.7.0 老师地基：人格、学生档案、记忆、课堂手记；课堂快照记录当次老师。
+      db.exec(TEACHER_SCHEMA)
+      const at = nowIso()
+      db.run(
+        `INSERT INTO teacher_persona(id, name, pronoun, tone, boundaries_json, version, updated_at)
+         VALUES (1, '老师', 'she', 'warm-rigorous', '[]', 1, ?)`,
+        at,
+      )
+      db.run(
+        `INSERT INTO learner_profile(id, goal, level, subjects_json, exam_date, weekly_minutes, notes, updated_at)
+         VALUES (1, '', '', '[]', NULL, 0, '', ?)`,
+        at,
+      )
+      db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 11, at)
     })
   }
 }

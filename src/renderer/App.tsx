@@ -116,8 +116,10 @@ export function App() {
   // 顶栏全文搜索：和左侧「搜文稿名」分开，搜的是正文块。
   const [globalQuery, setGlobalQuery] = useState('')
   const [searchHits, setSearchHits] = useState<SearchHit[]>([])
+  const [searchTotal, setSearchTotal] = useState(0)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchBusy, setSearchBusy] = useState(false)
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false)
   const searchRef = useRef<HTMLInputElement | null>(null)
   const [highlights, setHighlights] = useState<HighlightView[]>([])
   const [selection, setSelection] = useState<{ block: BlockView; start: number; end: number; quote: string; x: number; y: number } | null>(null)
@@ -213,6 +215,24 @@ export function App() {
     }, 260)
   }, [openVersion])
 
+  async function loadMoreSearch() {
+    if (!api || searchBusy || searchLoadingMore || searchHits.length >= searchTotal) return
+    const query = globalQuery.trim()
+    if (!query) return
+    setSearchLoadingMore(true)
+    const result = await api.documents.search({ query, limit: 20, offset: searchHits.length })
+    setSearchLoadingMore(false)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setSearchHits((current) => {
+      const seen = new Set(current.map((hit) => `${hit.documentVersionId}:${hit.blockId}`))
+      return [...current, ...result.data.items.filter((hit) => !seen.has(`${hit.documentVersionId}:${hit.blockId}`))]
+    })
+    setSearchTotal(result.data.total)
+  }
+
   useEffect(() => {
     if (!api) {
       setBooting(false)
@@ -278,20 +298,23 @@ export function App() {
     const query = globalQuery.trim()
     if (!query) {
       setSearchHits([])
+      setSearchTotal(0)
       setSearchBusy(false)
       return
     }
     let alive = true
     setSearchBusy(true)
     const timer = window.setTimeout(() => {
-      void api.documents.search({ query, limit: 20 }).then((result) => {
+      void api.documents.search({ query, limit: 20, offset: 0 }).then((result) => {
         if (!alive) return
         setSearchBusy(false)
         if (!result.ok) {
           setSearchHits([])
+          setSearchTotal(0)
           return
         }
         setSearchHits(result.data.items)
+        setSearchTotal(result.data.total)
       })
     }, 250)
     return () => {
@@ -341,6 +364,7 @@ export function App() {
 
   const page = pages[pageIndex] ?? null
   const activeJob = detail?.job ?? null
+  const invalidHighlights = highlights.filter((item) => !item.valid)
 
   async function importFiles() {
     if (!window.desk) return
@@ -783,6 +807,17 @@ export function App() {
     setHighlights((current) => current.filter((item) => item.id !== id))
   }
 
+  async function cleanupInvalidHighlights() {
+    if (!api || !selected) return
+    const result = await api.documents.cleanupHighlights({ documentVersionId: selected })
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setHighlights((current) => current.filter((item) => item.valid))
+    setNotice({ tone: 'info', text: `已清理 ${result.data.deleted} 处失效高亮。` })
+  }
+
   function startExcerpt() {
     if (!selection) return
     setExcerpt({ block: selection.block, quote: selection.quote, front: selection.quote, back: '' })
@@ -846,7 +881,7 @@ export function App() {
             <div className="row">
               <nav className="tabs">
                 <button className={`tab ${view === 'doc' ? 'active' : ''}`} onClick={() => setView('doc')}>文稿</button>
-                <button className={`tab ${view === 'study' ? 'active' : ''}`} onClick={() => setView('study')}>AI 私教</button>
+                <button className={`tab ${view === 'study' ? 'active' : ''}`} onClick={() => setView('study')}>老师</button>
                 <button className={`tab ${view === 'review' ? 'active' : ''}`} onClick={() => setView('review')}>复习</button>
               </nav>
               <button className="ghost" onClick={() => void openAi()}>模型{aiStatus?.configured ? ' · 已配置' : ''}</button>
@@ -864,7 +899,7 @@ export function App() {
               setSearchOpen(true)
             }}
             onFocus={() => setSearchOpen(true)}
-            placeholder="搜全文、页面文字、知识点…"
+            placeholder="搜正文和页面文字…"
             spellCheck={false}
             aria-label="全文搜索"
           />
@@ -872,11 +907,11 @@ export function App() {
           {searchOpen && (globalQuery.trim() || searchBusy) ? (
             <div className="search-panel">
               <div className="search-panel-head">
-                <span>{searchBusy ? '正在找…' : searchHits.length ? `找到 ${searchHits.length} 处` : '没有找到'}</span>
+                <span>{searchBusy ? '正在找…' : searchTotal ? `找到 ${searchTotal} 处` : '没有找到'}</span>
                 <button className="link-btn" onClick={() => setSearchOpen(false)}>关闭</button>
               </div>
-              {!searchBusy && searchHits.length === 0 ? (
-                <p className="empty">换一个词试试。搜索会查正文和页面文字，点结果直接跳到那一页。</p>
+              {!searchBusy && searchTotal === 0 ? (
+                <p className="empty">换一个词试试。搜索只查正文块和页面文字；卡片、摘录和 AI 知识点暂不进入结果。</p>
               ) : null}
               {searchHits.map((hit) => (
                 <button key={`${hit.blockId}-${hit.snippet}`} className="search-hit" onClick={() => void openSearchHit(hit)}>
@@ -884,6 +919,11 @@ export function App() {
                   <span className="search-hit-snippet">{hit.snippet}</span>
                 </button>
               ))}
+              {searchHits.length > 0 && searchHits.length < searchTotal ? (
+                <button className="ghost search-more" disabled={searchLoadingMore} onClick={() => void loadMoreSearch()}>
+                  {searchLoadingMore ? '加载中…' : `加载更多（已显示 ${searchHits.length} / ${searchTotal}）`}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -1023,7 +1063,7 @@ export function App() {
                   </div>
                   <div className="row">
                     <button className="ghost" onClick={() => void importFiles()} disabled={busy}>导入新课件</button>
-                    <button className="primary" onClick={() => setView('study')}>用它开始 AI 私教</button>
+                    <button className="primary" onClick={() => setView('study')}>用它开始跟老师学</button>
                   </div>
                 </header>
                 {activeJob ? <JobLine job={activeJob} onCancel={() => void cancelJob(activeJob)} onRetry={() => void retryJob(activeJob)} /> : null}
@@ -1100,6 +1140,12 @@ export function App() {
                           <h3>本页文字</h3>
                           <span>选中一段可以高亮或摘录成卡</span>
                         </header>
+                        {invalidHighlights.length ? (
+                          <div className="highlight-warning">
+                            <span>有 {invalidHighlights.length} 处高亮在当前版本里失效（原文或位置变了），不会显示。</span>
+                            <button className="link-btn" onClick={() => void cleanupInvalidHighlights()}>清理失效高亮</button>
+                          </div>
+                        ) : null}
                         {pageBlocks.map((block) => (
                           <HighlightText
                             key={block.blockId}
@@ -1338,6 +1384,11 @@ export function App() {
                   {restorePreview ? (
                     <div className="restore-card">
                       <p><b>备份版本 {restorePreview.version}</b> · {restorePreview.createdAt ? new Date(restorePreview.createdAt).toLocaleString('zh-CN') : '时间未知'}</p>
+                      <p className={restorePreview.verification === 'sha256' ? 'quiet' : 'warning'}>
+                        {restorePreview.verification === 'sha256'
+                          ? `数据库校验：已核对 SHA-256（${restorePreview.databaseSha256?.slice(0, 12) ?? ''}…）`
+                          : '这是旧版备份，没有数据库哈希；仍可恢复，但无法证明文件未被改动。'}
+                      </p>
                       <p className="quiet">{restorePreview.counts.documents} 份文稿 · {restorePreview.counts.pages} 页 · {restorePreview.counts.cards + restorePreview.counts.manualCards} 张卡 · {restorePreview.counts.misses} 道错题 · {restorePreview.counts.highlights} 条高亮</p>
                       <p className="warning">恢复会用这个备份覆盖当前整库；旧库会改名留作回滚，应用随后自动重启。模型 API Key 保留本机的。</p>
                       <div className="row">
@@ -1391,6 +1442,9 @@ export function App() {
                         本月已用 {formatNumber(appSettings.budgetStatus.used)} / {formatNumber(appSettings.budgetStatus.limit)} tokens（{appSettings.budgetStatus.percent}%），还剩 {formatNumber(appSettings.budgetStatus.remaining)}。
                         {appSettings.budgetStatus.exceeded ? ' 已到上限。' : ''}
                       </p>
+                      {appSettings.budgetStatus.estimated ? (
+                        <p className="warning">有 {appSettings.budgetStatus.estimatedCalls} 次模型调用没有返回用量，当前数字是估算；实际消耗可能更高。</p>
+                      ) : null}
                     </>
                   ) : <p className="quiet">护栏已关闭。</p>}
                 </>

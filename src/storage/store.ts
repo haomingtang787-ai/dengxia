@@ -276,7 +276,7 @@ export class Store {
     })
   }
 
-  searchBlocks(ftsQuery: string, limit: number): SearchHitRow[] {
+  searchBlocks(ftsQuery: string, limit: number, offset = 0): SearchHitRow[] {
     if (!ftsQuery) return []
     return this.db.all<SearchHitRow>(
       `SELECT s.document_version_id, s.document_id, s.page_id, s.block_id, s.page_number, s.kind,
@@ -286,10 +286,25 @@ export class Store {
        JOIN documents d ON d.id = s.document_id
        WHERE search_index MATCH ?
        ORDER BY s.rank, s.page_number ASC
-       LIMIT ?`,
+       LIMIT ? OFFSET ?`,
       ftsQuery,
       limit,
+      Math.max(0, offset),
     )
+  }
+
+  /** 搜索结果总数；不能拿当前页长度冒充，否则 UI 会把「只显示 20 条」说成全部。 */
+  countSearchBlocks(ftsQuery: string): number {
+    if (!ftsQuery) return 0
+    const row = this.db.get<{ total: number }>(
+      `SELECT COUNT(*) AS total
+       FROM search_index s
+       JOIN document_versions v ON v.id = s.document_version_id
+       JOIN documents d ON d.id = s.document_id
+       WHERE search_index MATCH ?`,
+      ftsQuery,
+    )
+    return Number(row?.total ?? 0)
   }
 
   listHighlights(versionId: string): HighlightRow[] {

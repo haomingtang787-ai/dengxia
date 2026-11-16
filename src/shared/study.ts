@@ -1,4 +1,5 @@
 import type { HabitsView } from './teaching'
+import type { TeacherNote } from './teacher'
 
 export type StudyStatus = 'ready' | 'finished'
 
@@ -88,5 +89,7 @@ export type StudySessionDetail = StudySessionListItem & {
   materialChunks: number
   habits: HabitsView
   summary: StudySummary | null
+  /** 下课自动生成的四段式老师手记；生成失败时为 null，不影响学习总结。 */
+  teacherNote: TeacherNote | null
   usage: StudyUsage
 }

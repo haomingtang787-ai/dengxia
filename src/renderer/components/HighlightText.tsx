@@ -17,7 +17,7 @@ export function HighlightText({ block, highlights, focused, onSelect, onDeleteHi
   const ranges = useMemo(
     () =>
       highlights
-        .filter((item) => item.blockId === block.blockId && item.startOffset >= 0 && item.endOffset <= block.text.length && item.endOffset > item.startOffset)
+        .filter((item) => item.valid && item.blockId === block.blockId && item.startOffset >= 0 && item.endOffset <= block.text.length && item.endOffset > item.startOffset)
         .slice()
         .sort((a, b) => a.startOffset - b.startOffset || a.endOffset - b.endOffset),
     [block.blockId, block.text.length, highlights],

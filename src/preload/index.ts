@@ -23,7 +23,7 @@ const desk = {
       invoke<import('../shared/contract').OpenSourceResult>(IpcChannel.documentsOpenSource, locator),
     delete: (body: { documentVersionId: string }) =>
       invoke<import('../shared/contract').DeleteDocumentResult>(IpcChannel.documentsDelete, body),
-    search: (body: { query: string; limit?: number }) =>
+    search: (body: { query: string; limit?: number; offset?: number }) =>
       invoke<import('../shared/search').SearchList>(IpcChannel.documentsSearch, body),
     highlights: (body: { documentVersionId: string }) =>
       invoke<import('../shared/highlights').HighlightList>(IpcChannel.documentsHighlights, body),
@@ -31,6 +31,8 @@ const desk = {
       invoke<import('../shared/highlights').HighlightView>(IpcChannel.documentsHighlightCreate, body),
     deleteHighlight: (body: { id: string }) =>
       invoke<{ deleted: boolean }>(IpcChannel.documentsHighlightDelete, body),
+    cleanupHighlights: (body: { documentVersionId: string }) =>
+      invoke<{ deleted: number }>(IpcChannel.documentsHighlightCleanup, body),
     rename: (body: { documentVersionId: string; displayName: string }) =>
       invoke<{ documentId: string; displayName: string }>(IpcChannel.documentsRename, body),
     pin: (body: { documentVersionId: string; pinned: boolean }) =>
@@ -166,6 +168,22 @@ const desk = {
         ipcRenderer.removeListener(IpcChannel.studyProgress, listener)
       }
     },
+  },
+  teacher: {
+    overview: () => invoke<import('../shared/teacher').TeacherOverview>(IpcChannel.teacherOverview, {}),
+    savePersona: (body: import('../shared/teacher').TeacherPersonaInput) =>
+      invoke<import('../shared/teacher').TeacherPersona>(IpcChannel.teacherPersonaSave, body),
+    saveProfile: (body: import('../shared/teacher').LearnerProfileInput) =>
+      invoke<import('../shared/teacher').LearnerProfile>(IpcChannel.teacherProfileSave, body),
+    memories: () => invoke<{ items: import('../shared/teacher').TeacherMemory[] }>(IpcChannel.teacherMemoryList, {}),
+    saveMemory: (body: import('../shared/teacher').TeacherMemoryInput) =>
+      invoke<import('../shared/teacher').TeacherMemory>(IpcChannel.teacherMemorySave, body),
+    deleteMemory: (body: { id: string }) =>
+      invoke<{ deleted: boolean }>(IpcChannel.teacherMemoryDelete, body),
+    reset: () => invoke<import('../shared/teacher').TeacherOverview>(IpcChannel.teacherReset, {}),
+    notes: () => invoke<{ items: import('../shared/teacher').TeacherNote[] }>(IpcChannel.teacherNoteList, {}),
+    note: (body: { sessionId: string }) =>
+      invoke<import('../shared/teacher').TeacherNote | null>(IpcChannel.teacherNoteGet, body),
   },
   preview: {
     onFocus: (callback: (focus: PreviewFocus) => void) => {

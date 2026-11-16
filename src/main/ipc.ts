@@ -8,6 +8,7 @@ import { DocumentService } from '../documents/service'
 import type { ImageService } from '../images/service'
 import type { TeachingService } from '../teaching/service'
 import type { StudyService } from '../study/service'
+import type { TeacherService } from '../teaching/teacherService'
 import type { AppInfoService } from '../app/info'
 import { ok, fail, type Result, type SaveTextResult } from '../shared/contract'
 import { IpcChannel, IPC_INVOKE_CHANNELS, type IpcInvokeChannel } from '../shared/ipc'
@@ -26,6 +27,7 @@ export function registerIpc(
   ai: AiService,
   images: ImageService,
   study: StudyService,
+  teacher: TeacherService,
   appInfo: AppInfoService,
 ): IpcInvokeChannel[] {
   const bind = (channel: IpcInvokeChannel, fn: (event: IpcMainInvokeEvent, body: unknown) => Promise<unknown> | unknown) => {
@@ -52,6 +54,7 @@ export function registerIpc(
   bind(IpcChannel.documentsHighlights, (_event, body) => service.highlights(body))
   bind(IpcChannel.documentsHighlightCreate, (_event, body) => service.createHighlight(body))
   bind(IpcChannel.documentsHighlightDelete, (_event, body) => service.deleteHighlight(body))
+  bind(IpcChannel.documentsHighlightCleanup, (_event, body) => service.cleanupHighlights(body))
   bind(IpcChannel.documentsRename, (_event, body) => service.rename(body))
   bind(IpcChannel.documentsPin, (_event, body) => service.pin(body))
   bind(IpcChannel.reviewSettingsGet, () => service.reviewSettings())
@@ -111,6 +114,15 @@ export function registerIpc(
   bind(IpcChannel.studyClearChat, (_event, body) => study.clearChat(body))
   bind(IpcChannel.studyClearSummary, (_event, body) => study.clearSummary(body))
   bind(IpcChannel.studyDelete, (_event, body) => study.deleteCourse(body))
+  bind(IpcChannel.teacherOverview, () => teacher.overview())
+  bind(IpcChannel.teacherPersonaSave, (_event, body) => teacher.savePersona(body))
+  bind(IpcChannel.teacherProfileSave, (_event, body) => teacher.saveProfile(body))
+  bind(IpcChannel.teacherMemoryList, () => teacher.memoryList())
+  bind(IpcChannel.teacherMemorySave, (_event, body) => teacher.memorySave(body))
+  bind(IpcChannel.teacherMemoryDelete, (_event, body) => teacher.memoryDelete(body))
+  bind(IpcChannel.teacherReset, () => teacher.reset())
+  bind(IpcChannel.teacherNoteList, () => teacher.noteList())
+  bind(IpcChannel.teacherNoteGet, (_event, body) => teacher.noteGet(body))
   bind(IpcChannel.appInfo, () => appInfo.info())
   bind(IpcChannel.appCheckUpdate, () => appInfo.checkUpdate())
   bind(IpcChannel.appSaveText, (event, body) => saveText(event, body))

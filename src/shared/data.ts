@@ -22,6 +22,9 @@ export type BudgetStatus = {
   hardStop: boolean
   exceeded: boolean
   warned: boolean
+  /** 没有返回 usage 的调用数；这些调用按 0 记，状态里明确标“估算”。 */
+  estimatedCalls: number
+  estimated: boolean
 }
 
 export type AppSettingsView = {
@@ -41,6 +44,9 @@ export type RestorePreview = {
   version: string
   createdAt: string
   schemaVersion: number
+  /** sha256：新备份已校验；legacy：0.6.0 及更早备份没有哈希，仍允许恢复但明确提示。 */
+  verification: 'sha256' | 'legacy'
+  databaseSha256: string | null
   counts: {
     documents: number
     pages: number

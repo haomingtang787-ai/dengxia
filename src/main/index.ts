@@ -18,6 +18,7 @@ import { migrate } from '../storage/migrate'
 import { Store } from '../storage/store'
 import { StudyStore } from '../storage/studyStore'
 import { TeachingService } from '../teaching/service'
+import { TeacherService } from '../teaching/teacherService'
 import { DEFAULT_HABITS } from '../teaching/habits'
 import { StudyService } from '../study/service'
 import { AppInfoService } from '../app/info'
@@ -240,9 +241,55 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     console.log('[smoke] 图片阅读', action, '字数', text.length, '内容', text.slice(0, 90).replace(/\n/g, ' / '))
     return
   }
+  if (action === 'teacher-note') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const note = await win.webContents.executeJavaScript(
+      `(() => { const n = document.querySelector('.study-teacher-note'); if (!n) return ''; n.scrollIntoView({ block: 'center' }); return n.innerText })()`,
+    )
+    console.log('[smoke] 老师手记', note.slice(0, 240).replace(/\n/g, ' / '))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    return
+  }
+  if (action === 'teacher-page') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    return
+  }
+  if (action === 'teacher-save') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await click('老师档案')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const filled = await win.webContents.executeJavaScript(
+      `(() => {
+        const input = document.querySelector('.teacher-profile input');
+        if (!input) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(input, '周老师');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`,
+    )
+    console.log('[smoke] 填写老师称呼', filled)
+    console.log('[smoke] 保存老师档案', await click('保存老师档案'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    return
+  }
+  if (action === 'teacher-profile') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log('[smoke] 打开老师档案', await click('老师档案'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    return
+  }
   if (action === 'study') {
     await new Promise((resolve) => setTimeout(resolve, 700))
-    console.log('[smoke] 打开 AI 私教', await click('AI 私教'))
+    console.log('[smoke] 打开老师页', await click('老师'))
     console.log('[smoke] 上传后零点击：等待自动完整读懂并拆课')
     let units = 0
     let overview = ''
@@ -634,6 +681,7 @@ async function boot(): Promise<void> {
   })
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
   const teaching = new TeachingService({ db })
+  const teacher = new TeacherService({ db })
   const budget = new BudgetService(db, settings)
   const ai = new AiService({ settings, teaching, budget })
   // 读图/查证也记 token 用量，和开课用量一起落到 ai_usage，课堂界面可以看到真实花费。
@@ -668,6 +716,7 @@ async function boot(): Promise<void> {
       const result = teaching.habits()
       return result.ok ? result.data : DEFAULT_HABITS
     },
+    teacher,
     onProgress: (progress) => {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(IpcChannel.studyProgress, progress)
@@ -675,7 +724,7 @@ async function boot(): Promise<void> {
     },
   })
   const appInfo = new AppInfoService()
-  registerIpc(ipcMain, service, teaching, ai, images, study, appInfo)
+  registerIpc(ipcMain, service, teaching, ai, images, study, teacher, appInfo)
   createWindow(service)
   const runAutoBackup = () => {
     void service?.autoBackup().then((result) => {

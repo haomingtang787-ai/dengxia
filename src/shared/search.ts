@@ -12,7 +12,7 @@ export type SearchHit = {
 
 export type SearchList = { items: SearchHit[]; total: number; query: string }
 
-export type SearchBody = { query: string; limit?: number }
+export type SearchBody = { query: string; limit?: number; offset?: number }
 
 /** 用户输入按空白切成字面 token，再用 FTS5 的 AND 串起来；不把 + - : * 当操作符。 */
 export function buildFtsQuery(input: string): string {

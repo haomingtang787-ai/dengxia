@@ -8,6 +8,9 @@ export type HighlightView = {
   quote: string
   color: string
   createdAt: string
+  /** 当前版本里 block 还在、偏移没越界、原文切片仍等于 quote。 */
+  valid: boolean
+  reason: 'block_missing' | 'offset_out_of_range' | 'quote_changed' | null
 }
 
 export type HighlightList = { items: HighlightView[] }

@@ -18,10 +18,11 @@ import type {
 import type { AppDatabase } from '../storage/database'
 import { StudyStore, messageFromRow, type StudyMessageRow, type StudySessionRow, type StudyUnitRow } from '../storage/studyStore'
 import type { Habits } from '../teaching/habits'
+import type { TeacherService } from '../teaching/teacherService'
 import { DEFAULT_HABITS, sanitizeHabits } from '../teaching/habits'
 import { DIRECT_PLAN_CHARS, MAX_MATERIAL_CHARS, digestMaterial, renderDigests } from './digest'
-import { parseStudyPlan, parseStudySummary } from './parse'
-import { buildStudyChatPrompt, buildStudyPlanPrompt, buildStudySummaryPrompt, mergeOpening } from './prompt'
+import { parseStudyPlan, parseStudySummary, parseTeacherNote } from './parse'
+import { buildStudyChatPrompt, buildStudyPlanPrompt, buildStudySummaryPrompt, buildTeacherNotePrompt, mergeOpening } from './prompt'
 import { groundUnits } from './ground'
 
 const MAX_MESSAGE_CHARS = 4_000
@@ -32,6 +33,8 @@ export type StudyServiceOptions = {
   settings: SettingsStore
   images: Pick<ImageService, 'vision' | 'ocr' | 'visionEmbedded'>
   habits: () => Habits
+  /** 0.7.0 起课程会带着老师的人格、学生档案和相关记忆；未注入时保持旧行为。 */
+  teacher?: TeacherService
   fetchImpl?: typeof fetch
   budget?: import('../ai/budget').BudgetService
   onProgress?: (progress: StudyProgress) => void
@@ -150,6 +153,7 @@ export class StudyService {
         subject: input.subject || '',
         material: digests ? '' : material.text,
         habits,
+        teacher: this.options.teacher?.context(input.subject || ''),
         truncated: material.truncated,
         digests: digests || undefined,
         chunkCount,
@@ -205,6 +209,7 @@ export class StudyService {
         material_chunks: chunkCount,
         status: 'ready',
         summary_json: '',
+        teacher_snapshot_json: this.options.teacher ? JSON.stringify(this.options.teacher.snapshot()) : '',
         created_at: timestamp,
         updated_at: timestamp,
       }
@@ -261,6 +266,7 @@ export class StudyService {
         messages,
         question: input.content,
         habits,
+        teacher: this.options.teacher?.context(session.subject, unit?.title ?? ''),
       })
       const answer = (await this.client().complete(prompt.system, prompt.user, 3000, 'disabled', 'chat')).trim()
       if (!answer) throw new AiError('AI_FAILED', '模型没有返回讲解。')
@@ -303,16 +309,35 @@ export class StudyService {
       const messages = this.messages(sessionId)
       this.usageSessionId = session.id
       this.usageVersionId = session.document_version_id
+      const checks = this.checks(sessionId)
       const prompt = buildStudySummaryPrompt({
         title: session.title,
         overview: session.overview,
         units,
         messages,
-        checks: this.checks(sessionId),
+        checks,
       })
-      const raw = await this.client().complete(prompt.system, prompt.user, 3000, 'disabled', 'summary')
+      const client = this.client()
+      const raw = await client.complete(prompt.system, prompt.user, 3000, 'disabled', 'summary')
       const summary = parseStudySummary(raw)
       this.store.saveSummary(sessionId, summary, nowIso())
+      // 手记是老师下一次课的记忆，不是学习总结的替代品：失败只记日志，不能把总结退回去。
+      if (this.options.teacher) {
+        try {
+          const notePrompt = buildTeacherNotePrompt({
+            teacherName: this.options.teacher.snapshot().name,
+            title: session.title,
+            overview: session.overview,
+            units,
+            messages,
+            checks,
+          })
+          const noteRaw = await client.complete(notePrompt.system, notePrompt.user, 2_000, 'disabled', 'teacher-note')
+          this.options.teacher.saveNote(sessionId, parseTeacherNote(noteRaw))
+        } catch (error) {
+          console.warn('[teacher-note]', error)
+        }
+      }
       return ok(requestId, this.detail(sessionId))
     } catch (error) {
       return this.failure(requestId, error)
@@ -568,6 +593,7 @@ export class StudyService {
       materialChunks: Number(session.material_chunks ?? 1),
       habits: this.readHabits(session),
       summary,
+      teacherNote: this.options.teacher?.noteForSession(sessionId) ?? null,
       usage: this.usageOf(sessionId),
     }
   }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DocumentListItem } from '../../shared/contract'
 import type { StudyCheck, StudyProgress, StudySessionDetail, StudySessionListItem, StudyUnit } from '../../shared/study'
 import { MathText } from '../components/MathText'
+import { TeacherProfile } from './TeacherProfile'
 import {
   AVOID_OPTIONS,
   DEFAULT_HABITS,
@@ -75,6 +76,8 @@ export function StudyView({
   const [sideOpen, setSideOpen] = useState(true)
   // 「管理」菜单：清对话 / 清总结 / 删课程，二次点击确认。
   const [manageOpen, setManageOpen] = useState(false)
+  const [teacherOpen, setTeacherOpen] = useState(false)
+  const [teacherName, setTeacherName] = useState('老师')
   const [confirmAction, setConfirmAction] = useState<'chat' | 'summary' | 'delete' | null>(null)
   const autoStarted = useRef('')
   // 三个滚动容器：讲稿区、消息区、当前讲次按钮，分别接管自己的滚动。
@@ -116,6 +119,18 @@ export function StudyView({
     },
     [api, notify],
   )
+
+  // 老师改名后，课堂上这枚小标签也要跟着变；否则用户改完还看见“老师”。
+  useEffect(() => {
+    let alive = true
+    void api?.teacher.overview().then((result) => {
+      if (!alive || !result.ok) return
+      setTeacherName(result.data.persona.name)
+    })
+    return () => {
+      alive = false
+    }
+  }, [api])
 
   useEffect(() => {
     let alive = true
@@ -223,7 +238,9 @@ export function StudyView({
     }
     setDetail(result.data)
     setBusy(null)
-    notify('info', '学习分析总结已生成。')
+    notify('info', result.data.teacherNote
+      ? '学习分析总结和老师手记已生成。'
+      : '学习分析总结已生成；老师手记这次没写成，不影响总结。')
   }
 
   async function saveCheck(unitOrdinal: number, segmentIndex: number, answer: string): Promise<boolean> {
@@ -289,7 +306,7 @@ export function StudyView({
     <div className={`study${detail ? ' has-course' : ''}`}>
       <header className="study-head">
         <div>
-          <span className="auto-pill">AI 私教</span>
+          <span className="auto-pill">{teacherName}</span>
           <h2>{detail ? detail.title : '把整份课件变成一门能对话的课'}</h2>
           <p className="quiet">
             {detail
@@ -300,6 +317,7 @@ export function StudyView({
           </p>
         </div>
         <div className="row study-actions">
+          <button className="ghost" onClick={() => setTeacherOpen(true)}>老师档案</button>
           <button className="ghost" onClick={onOpenDocs}>文稿库</button>
           {detail ? (
             <div className="study-manage">
@@ -509,6 +527,7 @@ export function StudyView({
                     </>
                   )}
                 </section>
+                {detail.teacherNote ? <TeacherNoteCard note={detail.teacherNote} /> : null}
               </>
             ) : (
               <button className="study-expand" title="展开总览与总结" onClick={() => setSideOpen(true)}>
@@ -521,6 +540,7 @@ export function StudyView({
           </button>
         </div>
       )}
+      <TeacherProfile open={teacherOpen} onClose={() => setTeacherOpen(false)} notify={notify} onPersonaSaved={setTeacherName} />
     </div>
   )
 }
@@ -601,6 +621,21 @@ function UnitSheet({
         })}
       </div>
     </article>
+  )
+}
+
+function TeacherNoteCard({ note }: { note: NonNullable<StudySessionDetail['teacherNote']> }) {
+  return (
+    <section className="study-teacher-note">
+      <div className="study-outline-title">
+        <h3>老师手记</h3>
+        <span className="chip">下课写下</span>
+      </div>
+      <p>{note.summary}</p>
+      {note.worked.length ? <SummaryGroup title="这次讲通了" items={note.worked} /> : null}
+      {note.stuck.length ? <SummaryGroup title="还卡着" items={note.stuck} /> : null}
+      {note.next.length ? <SummaryGroup title="下次先做" items={note.next} /> : null}
+    </section>
   )
 }
 

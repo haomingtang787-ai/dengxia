@@ -156,3 +156,27 @@ export function parseStudySummary(raw: string): StudySummary {
     next: stringList(root.next).slice(0, 12),
   }
 }
+
+export function parseTeacherNote(raw: string): {
+  summary: string
+  worked: string[]
+  stuck: string[]
+  next: string[]
+} {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(unwrap(raw))
+  } catch (error) {
+    if (error instanceof ArgumentError) throw error
+    throw new ArgumentError('模型返回的老师手记不是 JSON 格式。')
+  }
+  const root = record(parsed)
+  const summary = text(root.summary)
+  if (!summary) throw new ArgumentError('模型返回的老师手记缺少总览。')
+  return {
+    summary,
+    worked: stringList(root.worked).slice(0, 5),
+    stuck: stringList(root.stuck).slice(0, 5),
+    next: stringList(root.next).slice(0, 5),
+  }
+}
