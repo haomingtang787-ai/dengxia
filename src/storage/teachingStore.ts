@@ -49,6 +49,22 @@ export type CardRow = {
   back: string
   box: number
   due: number
+  suspended?: number
+  last_graded_at?: string | null
+}
+
+export type ManualCardRow = {
+  id: string
+  front: string
+  back: string
+  box: number
+  due: number
+  suspended: number
+  last_graded_at: string | null
+  document_version_id: string | null
+  page_id: string | null
+  quote: string | null
+  created_at: string
 }
 
 export type QuizRow = {
@@ -67,6 +83,9 @@ export type MissRow = {
   prompt: string
   explain: string
   at: number
+  box: number
+  due: number
+  last_graded_at: string | null
 }
 
 export type HabitRow = {
@@ -150,7 +169,8 @@ export class TeachingStore {
 
   insertCard(row: CardRow): void {
     this.db.run(
-      `INSERT INTO lecture_cards(lecture_id, ordinal, id, front, back, box, due) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO lecture_cards(lecture_id, ordinal, id, front, back, box, due, suspended, last_graded_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       row.lecture_id,
       row.ordinal,
       row.id,
@@ -158,6 +178,8 @@ export class TeachingStore {
       row.back,
       row.box,
       row.due,
+      row.suspended ?? 0,
+      row.last_graded_at ?? null,
     )
   }
 
@@ -210,6 +232,68 @@ export class TeachingStore {
     )
   }
 
+  editCard(lectureId: string, cardId: string, patch: { front?: string; back?: string; suspended?: number }): void {
+    this.db.run(
+      'UPDATE lecture_cards SET front = COALESCE(?, front), back = COALESCE(?, back), suspended = COALESCE(?, suspended) WHERE lecture_id = ? AND id = ?',
+      patch.front ?? null,
+      patch.back ?? null,
+      patch.suspended ?? null,
+      lectureId,
+      cardId,
+    )
+  }
+
+  setSuspended(lectureId: string, cardId: string, suspended: number): void {
+    this.db.run('UPDATE lecture_cards SET suspended = ? WHERE lecture_id = ? AND id = ?', suspended, lectureId, cardId)
+  }
+
+  insertManualCard(row: Omit<ManualCardRow, 'box' | 'due' | 'suspended' | 'last_graded_at'> & { box?: number; due?: number; suspended?: number; last_graded_at?: string | null }): void {
+    this.db.run(
+      `INSERT INTO manual_cards(id, front, back, box, due, suspended, last_graded_at, document_version_id, page_id, quote, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      row.id,
+      row.front,
+      row.back,
+      row.box ?? 0,
+      row.due ?? Date.now(),
+      row.suspended ?? 0,
+      row.last_graded_at ?? null,
+      row.document_version_id,
+      row.page_id,
+      row.quote ?? '',
+      row.created_at,
+    )
+  }
+
+  manualCards(): ManualCardRow[] {
+    return this.db.all<ManualCardRow>('SELECT * FROM manual_cards ORDER BY created_at DESC, rowid DESC')
+  }
+
+  manualCard(id: string): ManualCardRow | undefined {
+    return this.db.get<ManualCardRow>('SELECT * FROM manual_cards WHERE id = ?', id)
+  }
+
+  updateManualCard(id: string, box: number, due: number, gradedAt: string): void {
+    this.db.run('UPDATE manual_cards SET box = ?, due = ?, last_graded_at = ? WHERE id = ?', box, due, gradedAt, id)
+  }
+
+  editManualCard(id: string, patch: { front?: string; back?: string; suspended?: number }): void {
+    this.db.run(
+      'UPDATE manual_cards SET front = COALESCE(?, front), back = COALESCE(?, back), suspended = COALESCE(?, suspended) WHERE id = ?',
+      patch.front ?? null,
+      patch.back ?? null,
+      patch.suspended ?? null,
+      id,
+    )
+  }
+
+  dueManualCards(now: number): ManualCardRow[] {
+    return this.db.all<ManualCardRow>(
+      'SELECT * FROM manual_cards WHERE due <= ? AND suspended = 0 ORDER BY due ASC, created_at ASC',
+      now,
+    )
+  }
+
   /** 今天评过的卡片数，按本地零点到次日零点的 UTC 时间区间统计。 */
   gradedBetween(startIso: string, endIso: string): number {
     const row = this.db.get<{ total: number }>(
@@ -233,7 +317,7 @@ export class TeachingStore {
     return this.db.all<CardRow & { lecture_title: string }>(
       `SELECT c.*, l.title AS lecture_title
        FROM lecture_cards c JOIN lectures l ON l.id = c.lecture_id
-       WHERE c.due <= ?
+       WHERE c.due <= ? AND c.suspended = 0
        ORDER BY c.due, l.created_at DESC, c.ordinal`,
       now,
     )
@@ -276,12 +360,31 @@ export class TeachingStore {
     return this.db.all<MissRow>('SELECT * FROM misses ORDER BY at DESC, rowid DESC')
   }
 
+  miss(id: string): MissRow | undefined {
+    return this.db.get<MissRow>('SELECT * FROM misses WHERE id = ?', id)
+  }
+
+  dueMisses(now: number): MissRow[] {
+    return this.db.all<MissRow>('SELECT * FROM misses WHERE due <= ? ORDER BY due ASC, at DESC', now)
+  }
+
+  updateMiss(id: string, box: number, due: number, gradedAt: string): void {
+    this.db.run('UPDATE misses SET box = ?, due = ?, last_graded_at = ? WHERE id = ?', box, due, gradedAt, id)
+  }
+
+  manualCardsForDocument(versionId: string): ManualCardRow[] {
+    return this.db.all<ManualCardRow>(
+      'SELECT * FROM manual_cards WHERE document_version_id = ? ORDER BY created_at DESC',
+      versionId,
+    )
+  }
+
   replaceMisses(rows: MissRow[]): void {
     this.db.transaction(() => {
       this.db.run('DELETE FROM misses')
       for (const row of rows) {
-        this.db.run('INSERT INTO misses(id, lecture_id, prompt, explain, at) VALUES (?, ?, ?, ?, ?)',
-          row.id, row.lecture_id, row.prompt, row.explain, row.at)
+        this.db.run('INSERT INTO misses(id, lecture_id, prompt, explain, at, box, due, last_graded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          row.id, row.lecture_id, row.prompt, row.explain, row.at, row.box ?? 0, row.due ?? row.at, row.last_graded_at ?? null)
       }
     })
   }

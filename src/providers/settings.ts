@@ -16,6 +16,31 @@ export const DEFAULT_REVIEW: ReviewSettings = {
   remind: true,
 }
 
+export type BackupSettings = {
+  enabled: boolean
+  directory: string
+  keep: number
+  lastAt: string | null
+}
+
+export const DEFAULT_BACKUP: BackupSettings = {
+  enabled: false,
+  directory: '',
+  keep: 5,
+  lastAt: null,
+}
+
+export type BudgetSettings = {
+  /** 0 = 关闭预算护栏。单位 token。 */
+  monthlyTokens: number
+  hardStop: boolean
+}
+
+export const DEFAULT_BUDGET: BudgetSettings = {
+  monthlyTokens: 0,
+  hardStop: true,
+}
+
 export type SavedSettings = {
   libreOfficePath: string | null
   /** 只在这台机器上保存；密钥不会进日志，也不会下发给渲染层。 */
@@ -23,6 +48,8 @@ export type SavedSettings = {
   /** 文稿置顶：存文档 id，不动数据库结构。 */
   pinnedDocumentIds: string[]
   review: ReviewSettings
+  backup: BackupSettings
+  budget: BudgetSettings
 }
 
 const EMPTY: SavedSettings = {
@@ -30,6 +57,8 @@ const EMPTY: SavedSettings = {
   ai: null,
   pinnedDocumentIds: [],
   review: { ...DEFAULT_REVIEW },
+  backup: { ...DEFAULT_BACKUP },
+  budget: { ...DEFAULT_BUDGET },
 }
 
 export class SettingsStore {
@@ -48,18 +77,25 @@ export class SettingsStore {
         ai: readAi(parsed.ai),
         pinnedDocumentIds: readPinned(parsed.pinnedDocumentIds),
         review: readReview(parsed.review),
+        backup: readBackup((parsed as { backup?: unknown }).backup),
+        budget: readBudget((parsed as { budget?: unknown }).budget),
       }
     } catch {
-      return { ...EMPTY, review: { ...DEFAULT_REVIEW } }
+      return { ...EMPTY, review: { ...DEFAULT_REVIEW }, backup: { ...DEFAULT_BACKUP }, budget: { ...DEFAULT_BUDGET } }
     }
   }
 
-  save(settings: Omit<SavedSettings, 'review' | 'pinnedDocumentIds'> & {
+  save(settings: Omit<SavedSettings, 'review' | 'pinnedDocumentIds' | 'backup' | 'budget'> & {
     review?: ReviewSettings
     pinnedDocumentIds?: string[]
+    backup?: BackupSettings
+    budget?: BudgetSettings
   }): void {
-    const review = readReview(settings.review)
-    const pinnedDocumentIds = readPinned(settings.pinnedDocumentIds ?? [])
+    const current = this.load()
+    const review = readReview(settings.review ?? current.review)
+    const pinnedDocumentIds = readPinned(settings.pinnedDocumentIds ?? current.pinnedDocumentIds)
+    const backup = readBackup(settings.backup ?? current.backup)
+    const budget = readBudget(settings.budget ?? current.budget)
     fs.mkdirSync(path.dirname(this.file), { recursive: true })
     const temp = `${this.file}.tmp`
     fs.writeFileSync(
@@ -70,6 +106,8 @@ export class SettingsStore {
           ai: settings.ai,
           pinnedDocumentIds,
           review,
+          backup,
+          budget,
         },
         null,
         2,
@@ -114,6 +152,27 @@ function readReview(value: unknown): ReviewSettings {
     cardsPerDay: clampInt(raw.cardsPerDay, 1, 200, DEFAULT_REVIEW.cardsPerDay),
     missesPerDay: clampInt(raw.missesPerDay, 0, 100, DEFAULT_REVIEW.missesPerDay),
     remind: typeof raw.remind === 'boolean' ? raw.remind : DEFAULT_REVIEW.remind,
+  }
+}
+
+function readBackup(value: unknown): BackupSettings {
+  if (!value || typeof value !== 'object') return { ...DEFAULT_BACKUP }
+  const raw = value as Record<string, unknown>
+  const directory = typeof raw.directory === 'string' ? raw.directory.trim().slice(0, 1024) : ''
+  return {
+    enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULT_BACKUP.enabled,
+    directory,
+    keep: clampInt(raw.keep, 1, 30, DEFAULT_BACKUP.keep),
+    lastAt: typeof raw.lastAt === 'string' && !Number.isNaN(Date.parse(raw.lastAt)) ? raw.lastAt : null,
+  }
+}
+
+function readBudget(value: unknown): BudgetSettings {
+  if (!value || typeof value !== 'object') return { ...DEFAULT_BUDGET }
+  const raw = value as Record<string, unknown>
+  return {
+    monthlyTokens: clampInt(raw.monthlyTokens, 0, 100_000_000, DEFAULT_BUDGET.monthlyTokens),
+    hardStop: typeof raw.hardStop === 'boolean' ? raw.hardStop : DEFAULT_BUDGET.hardStop,
   }
 }
 

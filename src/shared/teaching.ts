@@ -29,7 +29,42 @@ export type TeachingCard = {
   back: string
   box: number
   due: number
+  suspended: boolean
+  /** lecture = AI 拆课生成的卡；manual = 手动加/摘录的卡。 */
+  origin: 'lecture' | 'manual'
+  lectureId?: string | null
+  documentVersionId?: string | null
+  pageId?: string | null
+  quote?: string | null
 }
+
+export type CardList = { items: TeachingCard[] }
+
+export type CardCreateBody = {
+  front: string
+  back?: string
+  quote?: string
+  documentVersionId?: string
+  pageId?: string | null
+}
+
+export type CardEditBody = {
+  origin: 'lecture' | 'manual'
+  cardId: string
+  lectureId?: string
+  front?: string
+  back?: string
+  suspended?: boolean
+}
+
+export type GradeCardBody = {
+  origin?: 'lecture' | 'manual'
+  lectureId?: string
+  cardId: string
+  remembered: boolean
+}
+
+export type GradeMissBody = { missId: string; remembered: boolean }
 
 /** 详情里不返回 answer / explain，判题在主进程做。 */
 export type TeachingQuiz = {
@@ -66,7 +101,8 @@ export type LectureDetail = LectureListItem & {
 export type LectureList = { items: LectureListItem[] }
 
 export type DueCardItem = {
-  lectureId: string
+  origin: 'lecture' | 'manual'
+  lectureId: string | null
   lectureTitle: string
   card: TeachingCard
 }
@@ -79,6 +115,9 @@ export type MissItem = {
   prompt: string
   explain: string
   at: number
+  box?: number
+  due?: number
+  lastGradedAt?: string | null
 }
 
 export type MissList = { items: MissItem[] }

@@ -68,6 +68,7 @@ export async function createHarness(options?: {
   repair?: boolean
   office?: OfficeGateway
   backupDir?: string
+  restart?: () => void
 }): Promise<Harness> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-'))
   const db = AppDatabase.open(path.join(root, 'library.sqlite'))
@@ -97,6 +98,7 @@ export async function createHarness(options?: {
     settings: new SettingsStore(path.join(root, 'settings.json')),
     limits: { ...LIMITS, ...options?.limits },
     repair: options?.repair,
+    restart: options?.restart,
     events: {
       jobsChanged(event) {
         const row = store.getJob(event.jobId)

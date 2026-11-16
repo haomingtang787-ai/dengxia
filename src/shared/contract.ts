@@ -173,6 +173,8 @@ export type LibraryStats = {
   blocks: number
   lectures: number
   cards: number
+  manualCards: number
+  highlights: number
   misses: number
   sessions: number
   checks: number

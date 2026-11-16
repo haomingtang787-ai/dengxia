@@ -1,6 +1,6 @@
 {
   "name": "desk-teacher-agent",
-  "version": "0.5.6",
+  "version": "0.6.0",
   "private": true,
   "description": "灯下：本地单用户教师文稿工作台，导入、解析、预览、AI 私教与复习",
   "main": "out/main/index.js",
@@ -23,6 +23,7 @@
     "@napi-rs/canvas": "1.1.1",
     "fast-xml-parser": "5.12.1",
     "fflate": "0.8.3",
+    "katex": "^0.16.22",
     "pdfjs-dist": "6.5.438",
     "react": "19.3.1",
     "react-dom": "19.3.1"

@@ -62,6 +62,7 @@ export type ImageServiceOptions = {
   visionPayload?: (file: string) => Promise<VisionPayload>
   /** 每次读图/查证成功后上报 token 用量，供成本统计。 */
   onUsage?: (kind: string, usage: AiUsage, documentVersionId: string) => void
+  budget?: import('../ai/budget').BudgetService
 }
 
 export class ImageService {
@@ -101,7 +102,7 @@ export class ImageService {
       const file = this.pageFile(page.document_version_id, page.id)
       const payload = await (this.options.visionPayload ?? defaultVisionPayload)(file)
       const model = config.visionModel?.trim() || config.model
-      const client = new AiClient({ ...config, model }, this.options.fetchImpl ?? globalThis.fetch, 90_000, (kind, usage) => this.options.onUsage?.(kind, usage, page.document_version_id))
+      const client = new AiClient({ ...config, model }, this.options.fetchImpl ?? globalThis.fetch, 90_000, (kind, usage) => this.options.onUsage?.(kind, usage, page.document_version_id), () => this.options.budget?.beforeCall())
       const text = (await client.describeImage({ ...payload, prompt: AI_READ_PROMPT, system: AI_READ_SYSTEM, kind: 'vision' })).trim()
       if (!text) throw new AiError('AI_FAILED', '模型没有返回这一页的知识点。')
       const reading = this.save(page.document_version_id, page.id, 'vision', text, model)
@@ -136,7 +137,7 @@ export class ImageService {
       if (!real) throw new NotFoundError('这一块的图片不在文库目录里。')
       const payload = await (this.options.visionPayload ?? defaultVisionPayload)(real)
       const model = config.visionModel?.trim() || config.model
-      const client = new AiClient({ ...config, model }, this.options.fetchImpl ?? globalThis.fetch, 90_000, (kind, usage) => this.options.onUsage?.(kind, usage, block.document_version_id))
+      const client = new AiClient({ ...config, model }, this.options.fetchImpl ?? globalThis.fetch, 90_000, (kind, usage) => this.options.onUsage?.(kind, usage, block.document_version_id), () => this.options.budget?.beforeCall())
       const text = (await client.describeImage({ ...payload, prompt: AI_READ_PROMPT, system: AI_READ_SYSTEM, kind: 'vision-embedded' })).trim()
       if (!text) throw new AiError('AI_FAILED', '模型没有返回这张图的讲解。')
       const row = {
@@ -244,7 +245,7 @@ export class ImageService {
       }
       if (!pageText) throw new ArgumentError('这一页还没有可查证的文字。等自动读懂完成，或填好模型后重试这一页。')
       const query = this.researchQuery(body, pageText)
-      const client = new AiClient(config, this.options.fetchImpl ?? globalThis.fetch, 90_000, (kind, usage) => this.options.onUsage?.(kind, usage, page.document_version_id))
+      const client = new AiClient(config, this.options.fetchImpl ?? globalThis.fetch, 90_000, (kind, usage) => this.options.onUsage?.(kind, usage, page.document_version_id), () => this.options.budget?.beforeCall())
       const sources = await client.search(query, 5)
       if (sources.length === 0) {
         throw new AiError('AI_FAILED', '没有搜到可用的网页结果。换一个更具体的页面标题或关键词再试。')
@@ -360,7 +361,7 @@ export class ImageService {
     if (error instanceof NotFoundError) return fail(requestId, 'NOT_FOUND', error.message)
     if (error instanceof OcrError) return fail(requestId, 'PARSE_FAILED', error.message)
     if (error instanceof AiError) {
-      return fail(requestId, error.code === 'AI_NOT_CONFIGURED' ? 'AI_NOT_CONFIGURED' : 'AI_FAILED', error.message)
+      return fail(requestId, error.code === 'AI_NOT_CONFIGURED' ? 'AI_NOT_CONFIGURED' : error.code === 'LIMIT_EXCEEDED' ? 'LIMIT_EXCEEDED' : 'AI_FAILED', error.message)
     }
     return fail(requestId, fallback, error instanceof Error ? error.message.slice(0, 220) : '图片处理失败。')
   }

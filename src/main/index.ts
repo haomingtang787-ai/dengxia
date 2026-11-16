@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { DocumentService, type DeskEvents, type NativeDialogs } from '../documents/service'
 import { AiService } from '../ai/service'
+import { BudgetService } from '../ai/budget'
 import { ImageService } from '../images/service'
 import { ForkWorker } from '../providers/forkWorker'
 import { LocalOfficeGateway } from '../providers/officeGateway'
@@ -424,6 +425,16 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 700))
     return
   }
+  if (action === 'settings') {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log('[smoke] 打开设置', await clickContains('模型'))
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const state = await win.webContents.executeJavaScript(
+      `(() => { const m = document.querySelector('.modal'); return { open: Boolean(m), text: m?.textContent?.slice(0, 80) ?? '', backup: Boolean(m?.textContent?.includes('备份')), budget: Boolean(m?.textContent?.includes('预算')) } })()`,
+    )
+    console.log('[smoke] 设置状态', JSON.stringify(state))
+    return
+  }
   if (action === 'model-open') {
     await new Promise((resolve) => setTimeout(resolve, 500))
     console.log('[smoke] 打开模型弹窗', await clickContains('模型'))
@@ -603,6 +614,10 @@ async function boot(): Promise<void> {
     settings,
     recheckIsolation: () => verifyOfficeIsolation(settings),
     version: () => app.getVersion(),
+    restart: () => {
+      app.relaunch()
+      setTimeout(() => app.exit(0), 200)
+    },
   })
   protocol.handle('app-resource', (request) => handleAppResource(store, root, request))
   const dev = Boolean(process.env.ELECTRON_RENDERER_URL)
@@ -619,13 +634,15 @@ async function boot(): Promise<void> {
   })
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
   const teaching = new TeachingService({ db })
-  const ai = new AiService({ settings, teaching })
+  const budget = new BudgetService(db, settings)
+  const ai = new AiService({ settings, teaching, budget })
   // 读图/查证也记 token 用量，和开课用量一起落到 ai_usage，课堂界面可以看到真实花费。
   const usageStore = new StudyStore(db)
   const images = new ImageService({
     store,
     root,
     settings,
+    budget,
     onUsage: (kind, usage, documentVersionId) => {
       try {
         usageStore.insertUsage({
@@ -646,6 +663,7 @@ async function boot(): Promise<void> {
     db,
     settings,
     images,
+    budget,
     habits: () => {
       const result = teaching.habits()
       return result.ok ? result.data : DEFAULT_HABITS
@@ -659,6 +677,13 @@ async function boot(): Promise<void> {
   const appInfo = new AppInfoService()
   registerIpc(ipcMain, service, teaching, ai, images, study, appInfo)
   createWindow(service)
+  const runAutoBackup = () => {
+    void service?.autoBackup().then((result) => {
+      if (result.ok && !result.data.skipped) console.log('[backup] 自动备份：', result.data.path)
+    })
+  }
+  setTimeout(runAutoBackup, 1500)
+  setInterval(runAutoBackup, 6 * 60 * 60 * 1000).unref()
   void verifyOfficeIsolation(settings).catch((error) => {
     console.error('[office] 隔离自检异常：', error)
   })

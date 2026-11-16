@@ -32,6 +32,9 @@ import {
   type StorageUsage,
 } from '../shared/contract'
 import { safeDisplayName, safeStoredName, sanitizeDocumentText } from '../shared/text'
+import { buildFtsQuery, snippetText, type SearchList } from '../shared/search'
+import type { HighlightCreateBody, HighlightList, HighlightView } from '../shared/highlights'
+import type { AutoBackupResult, PickBackupDirResult, RestoreApplied, RestorePreview, AppSettingsView, SaveAppSettingsBody, BudgetStatus } from '../shared/data'
 import type { OfficeGateway } from '../providers/officeGateway'
 import { officeIsolationStatus } from '../providers/isolation'
 import { planOfficeConversion } from '../providers/officeGateway'
@@ -41,6 +44,7 @@ import { resolvePreview } from '../retrieval/openSource'
 import { isInsideRoot, realpathInside, resolveInside } from '../storage/paths'
 import type { AppDatabase } from '../storage/database'
 import { Store, type JobRow, type VersionRow } from '../storage/store'
+import { CURRENT_SCHEMA_VERSION } from '../storage/migrate'
 import { AppError, isAppError } from './errors'
 import { detectFormat } from './formats'
 import { HandleTable } from './handles'
@@ -69,6 +73,7 @@ export class DocumentService {
   private readonly tails = new Map<string, Promise<void>>()
   private readonly inflight = new Set<Promise<void>>()
   private readonly limits: Limits
+  private readonly restoreTokens = new Map<string, string>()
 
   constructor(
     private readonly options: {
@@ -84,6 +89,8 @@ export class DocumentService {
       recheckIsolation?: () => Promise<void>
       /** 备份清单里记录的应用版本；测试里可缺省。 */
       version?: () => string
+      /** 恢复后重启应用；测试里可注入假函数。 */
+      restart?: () => void
     },
   ) {
     this.store = new Store(options.db)
@@ -195,6 +202,139 @@ export class DocumentService {
     }
   }
 
+  search(body: unknown): Result<SearchList> {
+    const requestId = randomUUID()
+    try {
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ArgumentError('请求格式不正确。')
+      const raw = body as Record<string, unknown>
+      const query = typeof raw.query === 'string' ? raw.query.trim() : ''
+      if (query.length > 200) throw new ArgumentError('搜索词最多 200 个字。')
+      const limit = typeof raw.limit === 'number' && Number.isInteger(raw.limit)
+        ? Math.max(1, Math.min(50, raw.limit))
+        : 20
+      const ftsQuery = buildFtsQuery(query)
+      if (!ftsQuery) return ok(requestId, { items: [], total: 0, query })
+      const rows = this.store.searchBlocks(ftsQuery, limit)
+      return ok(requestId, {
+        query,
+        total: rows.length,
+        items: rows.map((row) => ({
+          documentId: row.document_id,
+          documentVersionId: row.document_version_id,
+          displayName: row.display_name,
+          format: row.format,
+          pageNumber: row.page_number && row.page_number > 0 ? row.page_number : null,
+          pageId: row.page_id,
+          blockId: row.block_id,
+          kind: row.kind,
+          snippet: snippetText(row.text, query),
+        })),
+      })
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  highlights(body: unknown): Result<HighlightList> {
+    const requestId = randomUUID()
+    try {
+      const parsed = parseVersionBody(body)
+      const version = this.store.getVersion(parsed.documentVersionId)
+      if (!version) return fail(requestId, 'NOT_FOUND', '没有这份文稿。')
+      return ok(requestId, {
+        items: this.store.listHighlights(parsed.documentVersionId).map((row) => this.highlightView(row)),
+      })
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  createHighlight(body: unknown): Result<HighlightView> {
+    const requestId = randomUUID()
+    try {
+      const input = this.highlightBody(body)
+      const block = this.store.block(input.blockId)
+      if (!block || block.document_version_id !== input.documentVersionId) {
+        return fail(requestId, 'NOT_FOUND', '找不到要划线的这段文字。')
+      }
+      if (input.startOffset < 0 || input.endOffset <= input.startOffset || input.endOffset > block.text.length) {
+        throw new ArgumentError('划线的范围不对，请重新选择。')
+      }
+      const quote = block.text.slice(input.startOffset, input.endOffset).trim()
+      if (!quote) throw new ArgumentError('选中的内容是空的。')
+      if (quote.length > 500) throw new ArgumentError('一次最多高亮 500 个字。')
+      const row = {
+        id: randomUUID(),
+        document_version_id: input.documentVersionId,
+        page_id: input.pageId ?? block.page_id,
+        block_id: block.id,
+        start_offset: input.startOffset,
+        end_offset: input.endOffset,
+        quote,
+        color: input.color ?? 'yellow',
+        created_at: nowIso(),
+      }
+      this.store.insertHighlight(row)
+      return ok(requestId, this.highlightView(row))
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  deleteHighlight(body: unknown): Result<{ deleted: boolean }> {
+    const requestId = randomUUID()
+    try {
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ArgumentError('请求格式不正确。')
+      const id = (body as Record<string, unknown>).id
+      if (typeof id !== 'string' || !id) throw new ArgumentError('缺少高亮 id。')
+      return ok(requestId, { deleted: this.store.deleteHighlight(id) })
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  private highlightBody(body: unknown): HighlightCreateBody {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ArgumentError('请求格式不正确。')
+    const raw = body as Record<string, unknown>
+    if (typeof raw.documentVersionId !== 'string' || !raw.documentVersionId) throw new ArgumentError('缺少文稿版本。')
+    if (typeof raw.blockId !== 'string' || !raw.blockId) throw new ArgumentError('缺少段落 id。')
+    if (typeof raw.startOffset !== 'number' || !Number.isInteger(raw.startOffset)) throw new ArgumentError('划线起点无效。')
+    if (typeof raw.endOffset !== 'number' || !Number.isInteger(raw.endOffset)) throw new ArgumentError('划线终点无效。')
+    const color = typeof raw.color === 'string' && /^[a-z]{1,16}$/.test(raw.color) ? raw.color : 'yellow'
+    return {
+      documentVersionId: raw.documentVersionId,
+      blockId: raw.blockId,
+      startOffset: raw.startOffset,
+      endOffset: raw.endOffset,
+      pageId: typeof raw.pageId === 'string' ? raw.pageId : null,
+      color,
+    }
+  }
+
+  private highlightView(row: {
+    id: string
+    document_version_id: string
+    page_id: string | null
+    block_id: string
+    start_offset: number
+    end_offset: number
+    quote: string
+    color: string
+    created_at: string
+  }): HighlightView {
+    return {
+      id: row.id,
+      documentVersionId: row.document_version_id,
+      pageId: row.page_id,
+      blockId: row.block_id,
+      startOffset: row.start_offset,
+      endOffset: row.end_offset,
+      quote: row.quote,
+      color: row.color,
+      createdAt: row.created_at,
+    }
+  }
+
   rename(body: unknown): Result<{ documentId: string; displayName: string }> {
     const requestId = randomUUID()
     try {
@@ -292,42 +432,243 @@ export class DocumentService {
       } catch {
         /* 备份仍可继续；只是 WAL 未截断。 */
       }
-      // VACUUM INTO 生成一份一致、无 WAL 的库快照；直接拷 .sqlite 可能与 WAL 不同步。
-      await fs.promises.mkdir(destination, { recursive: true })
-      const databaseFile = path.join(destination, 'library.sqlite')
-      this.options.db.exec(`VACUUM INTO '${databaseFile.replace(/'/g, "''")}'`)
-      for (const name of ['originals', 'artifacts']) {
-        const source = path.join(this.options.root, name)
-        if (fs.existsSync(source)) {
-          await fs.promises.cp(source, path.join(destination, name), { recursive: true })
-        }
+      return ok(requestId, await this.writeBackup(destination))
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  /** 真正写一份备份；手动备份和自动备份共用。 */
+  async writeBackup(destination: string): Promise<BackupResult> {
+    await fs.promises.mkdir(destination, { recursive: true })
+    const databaseFile = path.join(destination, 'library.sqlite')
+    this.options.db.exec(`VACUUM INTO '${databaseFile.replace(/'/g, "''")}'`)
+    for (const name of ['originals', 'artifacts']) {
+      const source = path.join(this.options.root, name)
+      if (fs.existsSync(source)) {
+        await fs.promises.cp(source, path.join(destination, name), { recursive: true })
       }
-      const counts = this.store.stats()
-      const manifest = {
-        product: '灯下',
-        version: this.options.version?.() ?? 'unknown',
-        createdAt: nowIso(),
-        counts: {
-          documents: counts.documents,
-          pages: counts.pages,
-          cards: counts.cards,
-          misses: counts.misses,
-        },
-        note: '备份不含 settings.json（模型 API Key 留在本机）；恢复时把本文件夹内容复制回用户数据目录的 library 下即可。',
-      }
-      await fs.promises.writeFile(path.join(destination, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8')
-      const walk = walkDirectory(destination)
-      return ok(requestId, {
-        path: destination,
-        bytes: walk.bytes,
-        files: walk.files,
+    }
+    const counts = this.store.stats()
+    const manifest = {
+      product: '灯下',
+      version: this.options.version?.() ?? 'unknown',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: nowIso(),
+      counts: {
         documents: counts.documents,
         pages: counts.pages,
         cards: counts.cards,
+        manualCards: counts.manualCards,
+        highlights: counts.highlights,
         misses: counts.misses,
-      })
+      },
+      note: '备份不含 settings.json（模型 API Key 留在本机）；恢复时用应用里的「从备份恢复」。',
+    }
+    await fs.promises.writeFile(path.join(destination, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8')
+    const walk = walkDirectory(destination)
+    return {
+      path: destination,
+      bytes: walk.bytes,
+      files: walk.files,
+      documents: counts.documents,
+      pages: counts.pages,
+      cards: counts.cards,
+      misses: counts.misses,
+    }
+  }
+
+  pickBackupDirectory(windowId: string): Promise<Result<PickBackupDirResult>> {
+    const requestId = randomUUID()
+    return (async () => {
+      try {
+        const chosen = await this.options.dialogs.pickDirectory?.(windowId, '选择自动备份文件夹')
+        return ok(requestId, { path: chosen ?? null })
+      } catch (error) {
+        return this.asFailure(requestId, error)
+      }
+    })()
+  }
+
+  /** 启动时/定时调用；24 小时内只备份一次，默认关闭。 */
+  async autoBackup(): Promise<Result<AutoBackupResult>> {
+    const requestId = randomUUID()
+    try {
+      const backup = this.options.settings.load().backup
+      if (!backup.enabled || !backup.directory) {
+        return ok(requestId, { skipped: true, path: null, pruned: 0, reason: '自动备份未开启' })
+      }
+      const now = Date.now()
+      if (backup.lastAt && now - Date.parse(backup.lastAt) < 24 * 60 * 60 * 1000) {
+        return ok(requestId, { skipped: true, path: null, pruned: 0, reason: '距离上次自动备份不到 24 小时' })
+      }
+      const parent = path.join(backup.directory, '灯下自动备份')
+      await fs.promises.mkdir(parent, { recursive: true })
+      const stamp = backupStamp(new Date(now))
+      let destination = path.join(parent, `灯下备份-${stamp}`)
+      for (let suffix = 2; fs.existsSync(destination) && suffix < 100; suffix += 1) {
+        destination = path.join(parent, `灯下备份-${stamp}-${suffix}`)
+      }
+      const result = await this.writeBackup(destination)
+      const pruned = pruneAutoBackups(parent, backup.keep)
+      const settings = this.options.settings.load()
+      this.options.settings.save({ ...settings, backup: { ...settings.backup, lastAt: nowIso() } })
+      return ok(requestId, { skipped: false, path: result.path, pruned })
     } catch (error) {
       return this.asFailure(requestId, error)
+    }
+  }
+
+  async inspectRestore(windowId: string): Promise<Result<RestorePreview>> {
+    const requestId = randomUUID()
+    try {
+      const chosen = await this.options.dialogs.pickDirectory?.(windowId, '选择要恢复的灯下备份文件夹')
+      if (!chosen) return fail(requestId, 'CONFLICT', '没有选择备份文件夹。')
+      return ok(requestId, this.readRestorePreview(chosen))
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  private readRestorePreview(source: string): RestorePreview {
+    const manifestFile = path.join(source, 'manifest.json')
+    const databaseFile = path.join(source, 'library.sqlite')
+    if (!fs.existsSync(manifestFile) || !fs.existsSync(databaseFile)) {
+      throw new ArgumentError('这个文件夹不像灯下备份：缺少 manifest.json 或 library.sqlite。')
+    }
+    let manifest: {
+      product?: unknown
+      version?: unknown
+      createdAt?: unknown
+      schemaVersion?: unknown
+      counts?: Record<string, unknown>
+    }
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8')) as typeof manifest
+    } catch {
+      throw new ArgumentError('备份的 manifest.json 读不出来。')
+    }
+    if (manifest.product !== '灯下') throw new ArgumentError('这不是灯下生成的备份。')
+    const token = randomUUID()
+    this.restoreTokens.set(token, source)
+    if (this.restoreTokens.size > 12) this.restoreTokens.delete(this.restoreTokens.keys().next().value as string)
+    const counts = manifest.counts ?? {}
+    const number = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+    return {
+      token,
+      sourcePath: source,
+      version: typeof manifest.version === 'string' ? manifest.version : 'unknown',
+      createdAt: typeof manifest.createdAt === 'string' ? manifest.createdAt : '',
+      schemaVersion: number(manifest.schemaVersion),
+      counts: {
+        documents: number(counts.documents),
+        pages: number(counts.pages),
+        cards: number(counts.cards),
+        misses: number(counts.misses),
+        highlights: number(counts.highlights),
+        manualCards: number(counts.manualCards),
+      },
+    }
+  }
+
+  /** 关闭库、把备份复制成 staging、再把旧库改名留作回滚。 */
+  async applyRestore(body: unknown): Promise<Result<RestoreApplied>> {
+    const requestId = randomUUID()
+    try {
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ArgumentError('请求格式不正确。')
+      const token = (body as Record<string, unknown>).token
+      if (typeof token !== 'string' || !token) throw new ArgumentError('缺少恢复确认 token。')
+      const source = this.restoreTokens.get(token)
+      if (!source) throw new ArgumentError('恢复确认已过期，请重新选择备份。')
+      const preview = this.readRestorePreview(source)
+      const staging = `${this.options.root}.restore-${token.slice(0, 8)}`
+      const previous = `${this.options.root}.before-restore-${backupStamp(new Date())}`
+      await fs.promises.rm(staging, { recursive: true, force: true })
+      await fs.promises.cp(source, staging, { recursive: true })
+      fs.rmSync(path.join(staging, 'manifest.json'), { force: true })
+      const settingsFile = path.join(this.options.root, 'settings.json')
+      if (fs.existsSync(settingsFile)) await fs.promises.copyFile(settingsFile, path.join(staging, 'settings.json'))
+
+      await this.close()
+      let movedOld = false
+      let movedNew = false
+      try {
+        if (fs.existsSync(this.options.root)) {
+          fs.renameSync(this.options.root, previous)
+          movedOld = true
+        }
+        fs.renameSync(staging, this.options.root)
+        movedNew = true
+      } catch (error) {
+        if (!movedNew && fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true })
+        if (movedOld && !fs.existsSync(this.options.root) && fs.existsSync(previous)) fs.renameSync(previous, this.options.root)
+        throw error
+      }
+      this.restoreTokens.delete(token)
+      const restart = this.options.restart
+      if (restart) setTimeout(restart, 200)
+      return ok(requestId, { restored: true, sourcePath: source, previousPath: previous, counts: preview.counts })
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  appSettings(): Result<AppSettingsView> {
+    const requestId = randomUUID()
+    try {
+      return ok(requestId, this.settingsView())
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  saveAppSettings(body: unknown): Result<AppSettingsView> {
+    const requestId = randomUUID()
+    try {
+      const input = (body ?? {}) as SaveAppSettingsBody
+      const current = this.options.settings.load()
+      const backup = { ...current.backup, ...(input.backup ?? {}) }
+      if (typeof backup.directory !== 'string') throw new ArgumentError('备份目录不对。')
+      if (!Number.isInteger(backup.keep)) throw new ArgumentError('保留份数必须是整数。')
+      backup.keep = Math.max(1, Math.min(30, backup.keep))
+      if (typeof backup.enabled !== 'boolean') throw new ArgumentError('自动备份开关不对。')
+      const budget = { ...current.budget, ...(input.budget ?? {}) }
+      if (!Number.isInteger(budget.monthlyTokens) || budget.monthlyTokens < 0 || budget.monthlyTokens > 100_000_000) {
+        throw new ArgumentError('预算必须在 0 到 1 亿 token 之间。')
+      }
+      if (typeof budget.hardStop !== 'boolean') throw new ArgumentError('硬拦截开关不对。')
+      this.options.settings.save({ ...current, backup, budget })
+      return ok(requestId, this.settingsView())
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  private settingsView(): AppSettingsView {
+    const settings = this.options.settings.load()
+    return {
+      backup: settings.backup,
+      budget: settings.budget,
+      budgetStatus: this.budgetStatus(settings.budget.monthlyTokens, settings.budget.hardStop),
+    }
+  }
+
+  private budgetStatus(limit: number, hardStop: boolean): BudgetStatus {
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+    const used = this.store.tokensSince(monthStart.toISOString())
+    const percent = limit > 0 ? Math.min(100, Math.round((used / limit) * 1000) / 10) : 0
+    return {
+      limit,
+      used,
+      remaining: limit > 0 ? Math.max(0, limit - used) : 0,
+      percent,
+      monthStart: monthStart.toISOString(),
+      monthEnd: monthEnd.toISOString(),
+      hardStop,
+      exceeded: limit > 0 && used >= limit,
+      warned: limit > 0 && used / limit >= 0.8,
     }
   }
 
@@ -948,6 +1289,7 @@ export class DocumentService {
         })
       }
       const state = result.outcome
+      this.store.reindexVersion(version.id)
       this.store.setVersionStatus(version.id, state === 'succeeded' ? 'ready' : state === 'partial' ? 'partial' : 'failed')
       const total = Math.max(result.pages.length, result.blocks.length, 1)
       return this.store.updateJob(job.id, {
@@ -1184,6 +1526,34 @@ function fileBytes(file: string): number {
 
 function directoryBytes(dir: string): number {
   return walkDirectory(dir).bytes
+}
+
+function pruneAutoBackups(parent: string, keep: number): number {
+  let removed = 0
+  try {
+    const entries = fs
+      .readdirSync(parent, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('灯下备份-'))
+      .map((entry) => {
+        const full = path.join(parent, entry.name)
+        return { full, mtime: fs.statSync(full).mtimeMs }
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+    for (const entry of entries.slice(Math.max(1, keep))) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(entry.full, 'manifest.json'), 'utf8')) as { product?: unknown }
+        if (manifest.product !== '灯下') continue
+        if (path.dirname(entry.full) !== parent) continue
+        fs.rmSync(entry.full, { recursive: true, force: true })
+        removed += 1
+      } catch {
+        /* 不是完整的灯下备份就不动它。 */
+      }
+    }
+  } catch {
+    /* 目录读不到时不阻断备份。 */
+  }
+  return removed
 }
 
 function walkDirectory(rootDir: string): { bytes: number; files: number } {

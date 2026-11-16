@@ -1,4 +1,5 @@
 import type { JobState, ReviewState } from '../shared/contract'
+import { searchIndexText } from '../shared/search'
 import { AppDatabase } from './database'
 
 export type DocumentRow = {
@@ -77,6 +78,30 @@ export type ImageReadingRow = {
   kind: 'ocr' | 'vision'
   text: string
   engine: string
+  created_at: string
+}
+
+export type SearchHitRow = {
+  document_version_id: string
+  document_id: string
+  display_name: string
+  format: string
+  page_id: string | null
+  block_id: string
+  page_number: number | null
+  kind: string
+  text: string
+}
+
+export type HighlightRow = {
+  id: string
+  document_version_id: string
+  page_id: string | null
+  block_id: string
+  start_offset: number
+  end_offset: number
+  quote: string
+  color: string
   created_at: string
 }
 
@@ -213,6 +238,102 @@ export class Store {
       row.extraction_method,
       row.review_state,
     )
+  }
+
+  /** 解析提交后重建这一版的 FTS 行；比在每次 insertBlock 里维护更稳。 */
+  reindexVersion(versionId: string): void {
+    this.db.transaction(() => {
+      this.db.run('DELETE FROM search_index WHERE document_version_id = ?', versionId)
+      const rows = this.db.all<{
+        document_id: string
+        page_id: string | null
+        block_id: string
+        page_number: number
+        kind: string
+        body: string
+      }>(
+        `SELECT v.document_id, b.page_id, b.id AS block_id, COALESCE(p.ordinal, 0) AS page_number, b.kind, b.text AS body
+         FROM blocks b
+         JOIN document_versions v ON v.id = b.document_version_id
+         LEFT JOIN pages p ON p.id = b.page_id
+         WHERE b.document_version_id = ?`,
+        versionId,
+      )
+      for (const row of rows) {
+        this.db.run(
+          `INSERT INTO search_index(document_version_id, document_id, page_id, block_id, page_number, kind, body, text)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          versionId,
+          row.document_id,
+          row.page_id,
+          row.block_id,
+          row.page_number,
+          row.kind,
+          row.body,
+          searchIndexText(row.body),
+        )
+      }
+    })
+  }
+
+  searchBlocks(ftsQuery: string, limit: number): SearchHitRow[] {
+    if (!ftsQuery) return []
+    return this.db.all<SearchHitRow>(
+      `SELECT s.document_version_id, s.document_id, s.page_id, s.block_id, s.page_number, s.kind,
+              s.body AS text, d.display_name, v.format
+       FROM search_index s
+       JOIN document_versions v ON v.id = s.document_version_id
+       JOIN documents d ON d.id = s.document_id
+       WHERE search_index MATCH ?
+       ORDER BY s.rank, s.page_number ASC
+       LIMIT ?`,
+      ftsQuery,
+      limit,
+    )
+  }
+
+  listHighlights(versionId: string): HighlightRow[] {
+    return this.db.all<HighlightRow>(
+      'SELECT * FROM highlights WHERE document_version_id = ? ORDER BY created_at ASC, block_id ASC, start_offset ASC',
+      versionId,
+    )
+  }
+
+  insertHighlight(row: HighlightRow): void {
+    this.db.run(
+      `INSERT INTO highlights(id, document_version_id, page_id, block_id, start_offset, end_offset, quote, color, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      row.id,
+      row.document_version_id,
+      row.page_id,
+      row.block_id,
+      row.start_offset,
+      row.end_offset,
+      row.quote,
+      row.color,
+      row.created_at,
+    )
+  }
+
+  deleteHighlight(id: string): boolean {
+    const before = this.db.get<{ id: string }>('SELECT id FROM highlights WHERE id = ?', id)
+    if (!before) return false
+    this.db.run('DELETE FROM highlights WHERE id = ?', id)
+    return true
+  }
+
+  block(blockId: string): BlockRow | undefined {
+    return this.db.get<BlockRow>('SELECT * FROM blocks WHERE id = ?', blockId)
+  }
+
+  /** 预算护栏：当月已经用掉的 token（输入 + 输出）。 */
+  tokensSince(iso: string): number {
+    const row = this.db.get<{ total: number }>(
+      `SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total
+       FROM ai_usage WHERE created_at >= ?`,
+      iso,
+    )
+    return Number(row?.total ?? 0)
   }
 
   insertArtifact(row: ArtifactRow): void {
@@ -455,6 +576,8 @@ export class Store {
     blocks: number
     lectures: number
     cards: number
+    manualCards: number
+    highlights: number
     misses: number
     sessions: number
     checks: number
@@ -475,6 +598,8 @@ export class Store {
       blocks: one('SELECT COUNT(*) AS total FROM blocks'),
       lectures: one('SELECT COUNT(*) AS total FROM lectures'),
       cards: one('SELECT COUNT(*) AS total FROM lecture_cards'),
+      manualCards: one('SELECT COUNT(*) AS total FROM manual_cards'),
+      highlights: one('SELECT COUNT(*) AS total FROM highlights'),
       misses: one('SELECT COUNT(*) AS total FROM misses'),
       sessions: one('SELECT COUNT(*) AS total FROM study_sessions'),
       checks: one('SELECT COUNT(*) AS total FROM study_checks'),
@@ -657,6 +782,9 @@ export class Store {
         // jobs.retry_of 是指向 jobs 自己的外键：先摘掉再删，否则删父任务会撞约束。
         this.db.run('UPDATE jobs SET retry_of = NULL WHERE document_version_id = ?', versionId)
         this.db.run('DELETE FROM jobs WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM manual_cards WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM highlights WHERE document_version_id = ?', versionId)
+        this.db.run('DELETE FROM search_index WHERE document_version_id = ?', versionId)
         this.db.run('DELETE FROM issues WHERE document_version_id = ?', versionId)
         this.db.run('DELETE FROM block_readings WHERE document_version_id = ?', versionId)
         this.db.run('DELETE FROM blocks WHERE document_version_id = ?', versionId)

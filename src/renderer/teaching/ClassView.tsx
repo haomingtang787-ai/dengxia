@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { HabitsView, LectureDetail, LectureListItem } from '../../shared/teaching'
 import { firstSitting, sittingSentence, type PlanUnit } from '../../teaching/plan'
+import { MathText } from '../components/MathText'
 import {
   DEFAULT_HABITS,
   MINUTE_OPTIONS,
@@ -252,7 +253,7 @@ export function ClassView({ notify, onOpenDocs }: { notify: Notify; onOpenDocs: 
             <>
               <div className="teach-body">
                 {unit.teaching.split(/\n{2,}/).filter(Boolean).map((paragraph, index) => (
-                  <p key={index}>{paragraph}</p>
+                  <p key={index}><MathText text={paragraph} /></p>
                 ))}
               </div>
               {unit.terms.length ? (
@@ -262,8 +263,8 @@ export function ClassView({ notify, onOpenDocs }: { notify: Notify; onOpenDocs: 
                   ))}
                 </div>
               ) : null}
-              {unit.pitfall ? <p className="warning">坑点：{unit.pitfall}</p> : null}
-              {unit.example ? <p className="example">例子：{unit.example}</p> : null}
+              {unit.pitfall ? <p className="warning">坑点：<MathText text={unit.pitfall} /></p> : null}
+              {unit.example ? <p className="example">例子：<MathText text={unit.example} /></p> : null}
             </>
           )}
           <div className="row">
@@ -279,7 +280,7 @@ export function ClassView({ notify, onOpenDocs }: { notify: Notify; onOpenDocs: 
           <h3>这一页的大纲</h3>
           <div className="outline">
             {detail.summary.outline.map((line, index) => (
-              <p key={index}>{line}</p>
+              <p key={index}><MathText text={line} /></p>
             ))}
           </div>
         </section>
@@ -293,7 +294,7 @@ export function ClassView({ notify, onOpenDocs }: { notify: Notify; onOpenDocs: 
             const result = quizResults[quiz.id]
             return (
               <div key={quiz.id} className="quiz">
-                <p className="quiz-prompt">{quiz.prompt}</p>
+                <p className="quiz-prompt"><MathText text={quiz.prompt} /></p>
                 <div className="row">
                   {quiz.choices.map((choice, index) => (
                     <button
@@ -302,14 +303,14 @@ export function ClassView({ notify, onOpenDocs }: { notify: Notify; onOpenDocs: 
                       disabled={quizBusy || Boolean(result)}
                       onClick={() => void answer(quiz.id, index)}
                     >
-                      {choice}
+                      <MathText text={choice} />
                     </button>
                   ))}
                 </div>
                 {result ? (
                   <p className={result.correct ? 'quiet' : 'warning'}>
                     {result.correct ? '答对了。' : '答错了。'}
-                    {result.explain}
+                    <MathText text={result.explain} />
                   </p>
                 ) : null}
               </div>

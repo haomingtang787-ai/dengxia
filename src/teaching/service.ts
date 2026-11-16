@@ -4,6 +4,7 @@ import { fail, ok, type ExportPayload, type Result } from '../shared/contract'
 import type {
   DayMarkView,
   DueCardList,
+  DueCardItem,
   GradeCardResult,
   HabitsView,
   LectureDetail,
@@ -18,17 +19,21 @@ import type {
   TeachingSummary,
   TeachingUnit,
   TeachingWeight,
+  CardList,
+  CardCreateBody,
+  CardEditBody,
+  GradeCardBody,
+  GradeMissBody,
 } from '../shared/teaching'
 import type { AppDatabase } from '../storage/database'
 import { TeachingStore, type LectureRow, type MissRow } from '../storage/teachingStore'
 import { DEFAULT_HABITS, type Habits } from './habits'
 import { buildNote } from './note'
-import { bumpDay, gradeCard, mergeMisses, todayMark, type DayMark, type Miss } from './study'
+import { bumpDay, CARD_GAPS, gradeCard, mergeMisses, RELEARN_MS, todayMark, type DayMark, type Miss } from './study'
 import {
   parseAnswerQuiz,
   parseCreateLecture,
   parseCursor,
-  parseGradeCard,
   parseHabits,
   parseLectureId,
   parseMarkKnown,
@@ -212,26 +217,140 @@ export class TeachingService {
     })
   }
 
+  cardsList(): Result<CardList> {
+    return this.guard(() => {
+      const items: TeachingCard[] = []
+      for (const lecture of this.store.lectures()) {
+        for (const row of this.store.cards(lecture.id)) items.push(this.card(row))
+      }
+      for (const row of this.store.manualCards()) items.push(this.manualCardView(row))
+      items.sort((a, b) => a.due - b.due)
+      return { items }
+    })
+  }
+
+  cardCreate(body: unknown): Result<TeachingCard> {
+    return this.guard(() => {
+      if (!body || typeof body !== 'object' || Array.isArray(body)) throw new ArgumentError('请求格式不正确。')
+      const raw = body as CardCreateBody
+      const front = typeof raw.front === 'string' ? raw.front.trim() : ''
+      const back = typeof raw.back === 'string' ? raw.back.trim() : ''
+      const quote = typeof raw.quote === 'string' ? raw.quote.trim() : ''
+      if (!front) throw new ArgumentError('卡正面不能为空。')
+      if (front.length > 500) throw new ArgumentError('卡正面最多 500 个字。')
+      if (back.length > 1000) throw new ArgumentError('卡背面最多 1000 个字。')
+      if (quote.length > 500) throw new ArgumentError('摘录最多 500 个字。')
+      if (raw.documentVersionId) {
+        const version = this.options.db.get<{ id: string }>('SELECT id FROM document_versions WHERE id = ?', raw.documentVersionId)
+        if (!version) throw new MissingError('这份文稿不在库里。')
+      }
+      const id = randomUUID()
+      this.store.insertManualCard({
+        id,
+        front,
+        back,
+        document_version_id: raw.documentVersionId ?? null,
+        page_id: typeof raw.pageId === 'string' ? raw.pageId : null,
+        quote: quote || null,
+        created_at: new Date(this.clock()).toISOString(),
+      })
+      return this.manualCardView(this.store.manualCard(id)!)
+    })
+  }
+
+  cardEdit(body: unknown): Result<TeachingCard> {
+    return this.guard(() => {
+      const input = body as CardEditBody
+      if (!input || typeof input !== 'object') throw new ArgumentError('请求格式不正确。')
+      if (input.origin !== 'lecture' && input.origin !== 'manual') throw new ArgumentError('卡片来源不对。')
+      if (typeof input.cardId !== 'string' || !input.cardId) throw new ArgumentError('缺少卡片 id。')
+      const front = typeof input.front === 'string' ? input.front.trim() : undefined
+      const back = typeof input.back === 'string' ? input.back.trim() : undefined
+      if (front !== undefined && (!front || front.length > 500)) throw new ArgumentError('卡正面要在 1–500 字之间。')
+      if (back !== undefined && back.length > 1000) throw new ArgumentError('卡背面最多 1000 个字。')
+      const suspended = typeof input.suspended === 'boolean' ? (input.suspended ? 1 : 0) : undefined
+      if (input.origin === 'lecture') {
+        if (typeof input.lectureId !== 'string' || !input.lectureId) throw new ArgumentError('缺少课程 id。')
+        if (!this.store.lecture(input.lectureId)) throw new MissingError('找不到这份讲解。')
+        const row = this.store.card(input.lectureId, input.cardId)
+        if (!row) throw new MissingError('找不到这张卡片。')
+        this.store.editCard(input.lectureId, input.cardId, { front, back, suspended })
+        return this.card(this.store.card(input.lectureId, input.cardId)!)
+      }
+      const row = this.store.manualCard(input.cardId)
+      if (!row) throw new MissingError('找不到这张卡片。')
+      this.store.editManualCard(input.cardId, { front, back, suspended })
+      return this.manualCardView(this.store.manualCard(input.cardId)!)
+    })
+  }
+
   dueCards(): Result<DueCardList> {
-    return this.guard(() => ({
-      items: this.store.dueCards(this.clock()).map((row) => ({
+    return this.guard(() => {
+      const now = this.clock()
+      const items: DueCardItem[] = this.store.dueCards(now).map((row) => ({
+        origin: 'lecture',
         lectureId: row.lecture_id,
         lectureTitle: row.lecture_title,
         card: this.card(row),
-      })),
-    }))
+      }))
+      for (const row of this.store.dueManualCards(now)) {
+        const title = row.document_version_id
+          ? this.options.db.get<{ display_name: string }>(
+              `SELECT d.display_name FROM document_versions v JOIN documents d ON d.id = v.document_id WHERE v.id = ?`,
+              row.document_version_id,
+            )?.display_name
+          : null
+        items.push({
+          origin: 'manual',
+          lectureId: null,
+          lectureTitle: title ?? '手动卡 / 摘录',
+          card: this.manualCardView(row),
+        })
+      }
+      items.sort((a, b) => a.card.due - b.card.due)
+      return { items }
+    })
   }
 
   gradeCard(body: unknown): Result<GradeCardResult> {
     return this.guard(() => {
-      const { lectureId, cardId, remembered } = parseGradeCard(body)
+      const input = body as GradeCardBody
+      const remembered = Boolean(input?.remembered)
+      if (!input || typeof input !== 'object') throw new ArgumentError('请求格式不正确。')
+      if (typeof input.cardId !== 'string' || !input.cardId) throw new ArgumentError('缺少卡片 id。')
+      const origin = input.origin === 'manual' ? 'manual' : 'lecture'
+      if (origin === 'manual') {
+        const row = this.store.manualCard(input.cardId)
+        if (!row) throw new MissingError('找不到这张卡片。')
+        const graded = gradeCard(this.manualCardView(row), remembered, this.clock())
+        this.store.updateManualCard(row.id, graded.box, graded.due, new Date(this.clock()).toISOString())
+        this.bump('cards')
+        return { card: graded as TeachingCard, box: graded.box }
+      }
+      const lectureId = typeof input.lectureId === 'string' ? input.lectureId : ''
+      if (!lectureId) throw new ArgumentError('缺少课程 id。')
       if (!this.store.lecture(lectureId)) throw new MissingError('找不到这份讲解。')
-      const row = this.store.card(lectureId, cardId)
+      const row = this.store.card(lectureId, input.cardId)
       if (!row) throw new MissingError('找不到这张卡片。')
       const graded = gradeCard(this.card(row), remembered, this.clock())
-      this.store.updateCard(lectureId, cardId, graded.box, graded.due, new Date(this.clock()).toISOString())
+      this.store.updateCard(lectureId, input.cardId, graded.box, graded.due, new Date(this.clock()).toISOString())
       this.bump('cards')
-      return { card: graded, box: graded.box }
+      return { card: graded as TeachingCard, box: graded.box }
+    })
+  }
+
+  gradeMiss(body: unknown): Result<MissItem> {
+    return this.guard(() => {
+      const input = body as GradeMissBody
+      if (!input || typeof input !== 'object') throw new ArgumentError('请求格式不正确。')
+      if (typeof input.missId !== 'string' || !input.missId) throw new ArgumentError('缺少错题 id。')
+      const row = this.store.miss(input.missId)
+      if (!row) throw new MissingError('找不到这道错题。')
+      const now = this.clock()
+      const box = input.remembered ? Math.min(CARD_GAPS.length - 1, Number(row.box ?? 0) + 1) : 0
+      const due = input.remembered ? now + CARD_GAPS[box] : now + RELEARN_MS
+      this.store.updateMiss(row.id, box, due, new Date(now).toISOString())
+      return this.missItem({ ...row, box, due, last_graded_at: new Date(now).toISOString() })
     })
   }
 
@@ -243,7 +362,7 @@ export class TeachingService {
       const dayEnd = new Date(dayStart)
       dayEnd.setDate(dayEnd.getDate() + 1)
       return {
-        due: this.store.dueCards(now).length,
+        due: this.store.dueCards(now).length + this.store.dueManualCards(now).length,
         reviewedToday: this.store.gradedBetween(dayStart.toISOString(), dayEnd.toISOString()),
         misses: this.store.misses().length,
       }
@@ -252,7 +371,7 @@ export class TeachingService {
 
   exportCards(): Result<ExportPayload> {
     return this.guard(() => {
-      const rows = this.store.allCards()
+      const rows = [...this.store.allCards(), ...this.store.manualCards().map((row) => ({ front: row.front, back: row.back }))]
       const content = rows
         .map((row) => `${oneLine(row.front)}\t${oneLine(row.back)}`)
         .join('\n')
@@ -306,6 +425,9 @@ export class TeachingService {
               prompt: miss.prompt,
               explain: miss.explain,
               at: miss.at,
+              box: miss.box ?? 0,
+              due: miss.due ?? miss.at,
+              last_graded_at: miss.lastGradedAt ?? null,
             })),
           )
           missAdded = true
@@ -397,16 +519,59 @@ export class TeachingService {
     }
   }
 
-  private card(row: { id: string; front: string; back: string; box: number; due: number }): TeachingCard {
-    return { id: row.id, front: row.front, back: row.back, box: row.box, due: row.due }
+  private card(row: { id: string; front: string; back: string; box: number; due: number; suspended?: number; last_graded_at?: string | null; lecture_id?: string }): TeachingCard {
+    return {
+      id: row.id,
+      front: row.front,
+      back: row.back,
+      box: row.box,
+      due: row.due,
+      suspended: Boolean(row.suspended),
+      origin: 'lecture',
+      lectureId: row.lecture_id ?? null,
+    }
+  }
+
+  private manualCardView(row: import('../storage/teachingStore').ManualCardRow): TeachingCard {
+    return {
+      id: row.id,
+      front: row.front,
+      back: row.back,
+      box: row.box,
+      due: row.due,
+      suspended: Boolean(row.suspended),
+      origin: 'manual',
+      lectureId: null,
+      documentVersionId: row.document_version_id,
+      pageId: row.page_id,
+      quote: row.quote,
+    }
   }
 
   private miss(row: MissRow): Miss {
-    return { id: row.id, lectureId: row.lecture_id, prompt: row.prompt, explain: row.explain, at: row.at }
+    return {
+      id: row.id,
+      lectureId: row.lecture_id,
+      prompt: row.prompt,
+      explain: row.explain,
+      at: row.at,
+      box: row.box,
+      due: row.due,
+      lastGradedAt: row.last_graded_at,
+    }
   }
 
   private missItem(row: MissRow): MissItem {
-    return { id: row.id, lectureId: row.lecture_id, prompt: row.prompt, explain: row.explain, at: row.at }
+    return {
+      id: row.id,
+      lectureId: row.lecture_id,
+      prompt: row.prompt,
+      explain: row.explain,
+      at: row.at,
+      box: row.box,
+      due: row.due,
+      lastGradedAt: row.last_graded_at,
+    }
   }
 
   private bump(field: 'known' | 'cards' | 'quizzes'): void {

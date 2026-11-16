@@ -23,6 +23,14 @@ const desk = {
       invoke<import('../shared/contract').OpenSourceResult>(IpcChannel.documentsOpenSource, locator),
     delete: (body: { documentVersionId: string }) =>
       invoke<import('../shared/contract').DeleteDocumentResult>(IpcChannel.documentsDelete, body),
+    search: (body: { query: string; limit?: number }) =>
+      invoke<import('../shared/search').SearchList>(IpcChannel.documentsSearch, body),
+    highlights: (body: { documentVersionId: string }) =>
+      invoke<import('../shared/highlights').HighlightList>(IpcChannel.documentsHighlights, body),
+    createHighlight: (body: import('../shared/highlights').HighlightCreateBody) =>
+      invoke<import('../shared/highlights').HighlightView>(IpcChannel.documentsHighlightCreate, body),
+    deleteHighlight: (body: { id: string }) =>
+      invoke<{ deleted: boolean }>(IpcChannel.documentsHighlightDelete, body),
     rename: (body: { documentVersionId: string; displayName: string }) =>
       invoke<{ documentId: string; displayName: string }>(IpcChannel.documentsRename, body),
     pin: (body: { documentVersionId: string; pinned: boolean }) =>
@@ -37,6 +45,13 @@ const desk = {
     storage: () => invoke<import('../shared/contract').StorageUsage>(IpcChannel.dataStorage, {}),
     stats: () => invoke<import('../shared/contract').LibraryStats>(IpcChannel.dataStats, {}),
     backup: () => invoke<import('../shared/contract').BackupResult>(IpcChannel.dataBackup, {}),
+    pickBackupDir: () => invoke<import('../shared/data').PickBackupDirResult>(IpcChannel.dataBackupPickDir, {}),
+    autoBackup: () => invoke<import('../shared/data').AutoBackupResult>(IpcChannel.dataAutoBackup, {}),
+    inspectRestore: () => invoke<import('../shared/data').RestorePreview>(IpcChannel.dataRestoreInspect, {}),
+    applyRestore: (body: { token: string }) => invoke<import('../shared/data').RestoreApplied>(IpcChannel.dataRestoreApply, body),
+    settings: () => invoke<import('../shared/data').AppSettingsView>(IpcChannel.dataSettingsGet, {}),
+    saveSettings: (body: import('../shared/data').SaveAppSettingsBody) =>
+      invoke<import('../shared/data').AppSettingsView>(IpcChannel.dataSettingsSave, body),
   },
   jobs: {
     get: (body: { jobId: string }) => invoke<import('../shared/contract').JobSnapshot>(IpcChannel.jobsGet, body),
@@ -71,8 +86,17 @@ const desk = {
     setCursor: (body: { lectureId: string; cursor: number }) =>
       invoke<{ cursor: number }>(IpcChannel.teachingSetCursor, body),
     dueCards: () => invoke<import('../shared/teaching').DueCardList>(IpcChannel.teachingDueCards, {}),
-    gradeCard: (body: { lectureId: string; cardId: string; remembered: boolean }) =>
+    cards: {
+      list: () => invoke<import('../shared/teaching').CardList>(IpcChannel.teachingCardsList, {}),
+      create: (body: import('../shared/teaching').CardCreateBody) =>
+        invoke<import('../shared/teaching').TeachingCard>(IpcChannel.teachingCardCreate, body),
+      edit: (body: import('../shared/teaching').CardEditBody) =>
+        invoke<import('../shared/teaching').TeachingCard>(IpcChannel.teachingCardEdit, body),
+    },
+    gradeCard: (body: import('../shared/teaching').GradeCardBody) =>
       invoke<import('../shared/teaching').GradeCardResult>(IpcChannel.teachingGradeCard, body),
+    gradeMiss: (body: import('../shared/teaching').GradeMissBody) =>
+      invoke<import('../shared/teaching').MissItem>(IpcChannel.teachingGradeMiss, body),
     answerQuiz: (body: { lectureId: string; quizId: string; choice: number }) =>
       invoke<import('../shared/teaching').QuizAnswerResult>(IpcChannel.teachingAnswerQuiz, body),
     misses: (body: { limit?: number } = {}) =>

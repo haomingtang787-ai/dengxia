@@ -18,6 +18,7 @@ export class AiService {
     private readonly options: {
       settings: SettingsStore
       teaching: TeachingService
+      budget?: import('./budget').BudgetService
       fetchImpl?: typeof fetch
       timeoutMs?: number
     },
@@ -170,7 +171,13 @@ export class AiService {
   }
 
   private client(config: AiConfig): AiClient {
-    return new AiClient(config, this.options.fetchImpl ?? globalThis.fetch, this.options.timeoutMs)
+    return new AiClient(
+      config,
+      this.options.fetchImpl ?? globalThis.fetch,
+      this.options.timeoutMs,
+      undefined,
+      () => this.options.budget?.beforeCall(),
+    )
   }
 
   private url(value: unknown): string {

@@ -21,7 +21,7 @@ function retryableStatus(status: number): boolean {
 
 export class AiError extends Error {
   constructor(
-    readonly code: 'AI_FAILED' | 'AI_NOT_CONFIGURED',
+    readonly code: 'AI_FAILED' | 'AI_NOT_CONFIGURED' | 'LIMIT_EXCEEDED',
     message: string,
   ) {
     super(message)
@@ -35,6 +35,8 @@ export class AiClient {
     private readonly fetchImpl: typeof fetch = globalThis.fetch,
     private readonly timeoutMs = 60_000,
     private readonly onUsage?: AiUsageSink,
+    /** 每次真正发模型请求前调用；预算到顶时抛 AiError('LIMIT_EXCEEDED')。 */
+    private readonly beforeCall?: () => void,
   ) {}
 
   private endpoint(): string {
@@ -154,6 +156,7 @@ export class AiClient {
     thinking: 'enabled' | 'disabled' = 'enabled',
     kind = 'chat',
   ): Promise<string> {
+    this.beforeCall?.()
     let response: Response | null = null
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
@@ -204,6 +207,7 @@ export class AiClient {
 
   /** 让支持图片输入的 OpenAI 兼容模型读一张图；用于扫描件、图表和课件截图。 */
   async describeImage(input: { mime: string; base64: string; prompt: string; model?: string; system?: string; kind?: string }): Promise<string> {
+    this.beforeCall?.()
     let response: Response | null = null
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {

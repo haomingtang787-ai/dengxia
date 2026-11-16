@@ -7,6 +7,10 @@ import type { AiConfigView } from '../shared/ai'
 import { DEFAULT_AI } from '../shared/ai'
 import type { ImageReading, AutoReadResult } from '../shared/images'
 import type { PageResearch } from '../shared/research'
+import type { SearchHit } from '../shared/search'
+import type { HighlightView } from '../shared/highlights'
+import { HighlightText } from './components/HighlightText'
+import { MathText } from './components/MathText'
 
 const STATE_LABEL: Record<string, string> = {
   queued: '排队',
@@ -109,11 +113,24 @@ export function App() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameText, setRenameText] = useState('')
   const listFilter = useRef({ query: '', format: '' })
+  // 顶栏全文搜索：和左侧「搜文稿名」分开，搜的是正文块。
+  const [globalQuery, setGlobalQuery] = useState('')
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([])
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchBusy, setSearchBusy] = useState(false)
+  const searchRef = useRef<HTMLInputElement | null>(null)
+  const [highlights, setHighlights] = useState<HighlightView[]>([])
+  const [selection, setSelection] = useState<{ block: BlockView; start: number; end: number; quote: string; x: number; y: number } | null>(null)
+  const [excerpt, setExcerpt] = useState<{ block: BlockView; quote: string; front: string; back: string } | null>(null)
+  const [excerptBusy, setExcerptBusy] = useState(false)
   // 设置里的复习目标与本机数据。
   const [reviewForm, setReviewForm] = useState<ReviewSettingsView>({ cardsPerDay: 10, missesPerDay: 5, remind: true })
   const [storage, setStorage] = useState<StorageUsage | null>(null)
   const [stats, setStats] = useState<LibraryStats | null>(null)
   const [backup, setBackup] = useState<BackupResult | null>(null)
+  const [appSettings, setAppSettings] = useState<import('../shared/data').AppSettingsView | null>(null)
+  const [restorePreview, setRestorePreview] = useState<import('../shared/data').RestorePreview | null>(null)
+  const [restoreBusy, setRestoreBusy] = useState(false)
   const [dataBusy, setDataBusy] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null)
   const [updateFile, setUpdateFile] = useState<string | null>(null)
@@ -154,12 +171,13 @@ export function App() {
 
   const openVersion = useCallback(async (documentVersionId: string, preferredPage?: number) => {
     if (!window.desk) return
-    const [got, loadedPages, loose, imageReadings, researchItems] = await Promise.all([
+    const [got, loadedPages, loose, imageReadings, researchItems, highlightItems] = await Promise.all([
       window.desk.documents.get({ documentVersionId }),
       loadAllPages(documentVersionId),
       loadBlocks({ documentVersionId, scope: 'unpaged' }),
       window.desk.images.readings({ documentVersionId }),
       window.desk.research.list({ documentVersionId }),
+      window.desk.documents.highlights({ documentVersionId }),
     ])
     if (!got.ok) {
       setNotice({ tone: 'bad', text: got.error.message })
@@ -172,11 +190,28 @@ export function App() {
     setUnpaged(loose)
     setReadings(imageReadings.ok ? imageReadings.data.items : [])
     setResearch(researchItems.ok ? researchItems.data.items : [])
+    setHighlights(highlightItems.ok ? highlightItems.data.items : [])
+    setSelection(null)
     setAutoStatuses({})
     const nextIndex = preferredPage ? Math.max(0, loadedPages.findIndex((page) => page.ordinal === preferredPage)) : 0
     setPageIndex(nextIndex < 0 ? 0 : nextIndex)
     void autoReadVersion(documentVersionId)
   }, [])
+
+  const openSearchHit = useCallback(async (hit: SearchHit) => {
+    setSearchOpen(false)
+    setView('doc')
+    await openVersion(hit.documentVersionId, hit.pageNumber ?? undefined)
+    setFocus({
+      documentVersionId: hit.documentVersionId,
+      pageId: hit.pageId ?? undefined,
+      pageNumber: hit.pageNumber ?? undefined,
+      blockId: hit.blockId,
+    })
+    window.setTimeout(() => {
+      document.getElementById(`block-${hit.blockId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 260)
+  }, [openVersion])
 
   useEffect(() => {
     if (!api) {
@@ -237,6 +272,47 @@ export function App() {
     const timer = window.setTimeout(() => void refreshList(), search ? 250 : 0)
     return () => window.clearTimeout(timer)
   }, [api, booting, search, formatFilter, refreshList])
+
+  useEffect(() => {
+    if (!api) return
+    const query = globalQuery.trim()
+    if (!query) {
+      setSearchHits([])
+      setSearchBusy(false)
+      return
+    }
+    let alive = true
+    setSearchBusy(true)
+    const timer = window.setTimeout(() => {
+      void api.documents.search({ query, limit: 20 }).then((result) => {
+        if (!alive) return
+        setSearchBusy(false)
+        if (!result.ok) {
+          setSearchHits([])
+          return
+        }
+        setSearchHits(result.data.items)
+      })
+    }, 250)
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [api, globalQuery])
+
+  useEffect(() => {
+    if (!api) return
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setSearchOpen(true)
+        searchRef.current?.focus()
+      }
+      if (event.key === 'Escape') setSearchOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [api])
 
   useEffect(() => {
     if (!api) return
@@ -371,10 +447,11 @@ export function App() {
     }
     const info = await api.app.info()
     if (info.ok) setAppInfo(info.data)
-    const [review, usage, overview] = await Promise.all([api.review.settings(), api.data.storage(), api.data.stats()])
+    const [review, usage, overview, dataSettings] = await Promise.all([api.review.settings(), api.data.storage(), api.data.stats(), api.data.settings()])
     if (review.ok) setReviewForm(review.data)
     if (usage.ok) setStorage(usage.data)
     if (overview.ok) setStats(overview.data)
+    if (dataSettings.ok) setAppSettings(dataSettings.data)
   }
 
   async function checkUpdate() {
@@ -399,6 +476,53 @@ export function App() {
     }
     setReviewForm(result.data)
     setNotice({ tone: 'info', text: `复习目标已保存：每天 ${result.data.cardsPerDay} 张卡、${result.data.missesPerDay} 道错题。` })
+  }
+
+  async function saveDataSettings(patch: import('../shared/data').SaveAppSettingsBody) {
+    if (!api || dataBusy) return
+    setDataBusy(true)
+    const result = await api.data.saveSettings(patch)
+    setDataBusy(false)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setAppSettings(result.data)
+  }
+
+  async function chooseBackupDirectory() {
+    if (!api || dataBusy) return
+    setDataBusy(true)
+    const picked = await api.data.pickBackupDir()
+    setDataBusy(false)
+    if (!picked.ok || !picked.data.path) return
+    await saveDataSettings({ backup: { enabled: true, directory: picked.data.path } })
+    setNotice({ tone: 'info', text: '自动备份目录已保存。' })
+  }
+
+  async function inspectRestore() {
+    if (!api || restoreBusy) return
+    setRestoreBusy(true)
+    const result = await api.data.inspectRestore()
+    setRestoreBusy(false)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setRestorePreview(result.data)
+  }
+
+  async function applyRestore() {
+    if (!api || !restorePreview || restoreBusy) return
+    setRestoreBusy(true)
+    const result = await api.data.applyRestore({ token: restorePreview.token })
+    setRestoreBusy(false)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setRestorePreview(null)
+    setNotice({ tone: 'info', text: `已恢复 ${result.data.counts.documents} 份文稿、${result.data.counts.pages} 页；应用会自己重启。` })
   }
 
   async function backupLibrary() {
@@ -632,6 +756,63 @@ export function App() {
     else if (!result.data.opened) setNotice({ tone: 'info', text: '内部预览没有定位到这个来源。' })
   }
 
+  async function addHighlight() {
+    if (!api || !selection || !selected) return
+    const result = await api.documents.createHighlight({
+      documentVersionId: selected,
+      pageId: selection.block.locator.pageId ?? null,
+      blockId: selection.block.blockId,
+      startOffset: selection.start,
+      endOffset: selection.end,
+    })
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setHighlights((current) => [...current, result.data])
+    setSelection(null)
+  }
+
+  async function removeHighlight(id: string) {
+    if (!api) return
+    const result = await api.documents.deleteHighlight({ id })
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setHighlights((current) => current.filter((item) => item.id !== id))
+  }
+
+  function startExcerpt() {
+    if (!selection) return
+    setExcerpt({ block: selection.block, quote: selection.quote, front: selection.quote, back: '' })
+    setSelection(null)
+  }
+
+  async function saveExcerpt() {
+    if (!api || !excerpt || !selected) return
+    const front = excerpt.front.trim()
+    if (!front) {
+      setNotice({ tone: 'bad', text: '卡正面不能为空。' })
+      return
+    }
+    setExcerptBusy(true)
+    const result = await api.teaching.cards.create({
+      front,
+      back: excerpt.back.trim(),
+      quote: excerpt.quote,
+      documentVersionId: selected,
+      pageId: excerpt.block.locator.pageId ?? null,
+    })
+    setExcerptBusy(false)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setExcerpt(null)
+    setNotice({ tone: 'info', text: '已做成卡片，会进入复习队列。' })
+  }
+
   const outline = useMemo(() => [...unpaged, ...pageBlocks], [unpaged, pageBlocks])
   const pageReadings = page ? preferredReadings(readings.filter((item) => item.pageId === page.pageId)) : []
   const pageResearch = page ? research.find((item) => item.pageId === page.pageId) : undefined
@@ -648,31 +829,66 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="top">
-        <div className="brand">
-          <div className="brand-title">
-            <svg className="brand-logo" viewBox="0 0 24 24" aria-hidden="true">
-              <path fill="#1f9d80" d="M9 2.5h6v2h-2v4.1a6 6 0 0 1 4.2 5.7v2.2H6.8v-2.2a6 6 0 0 1 4.2-5.7V4.5H9v-2z" />
-              <path fill="#ffb84d" d="M11 15.6h2v2.2h-2z" />
-              <path fill="#173e3a" d="M10.2 18.6h3.6l-.5 2.2h-2.6z" />
-            </svg>
-            <strong>灯下</strong>
+      <div className="top-stack">
+        <header className="top">
+          <div className="brand">
+            <div className="brand-title">
+              <svg className="brand-logo" viewBox="0 0 24 24" aria-hidden="true">
+                <path fill="#1f9d80" d="M9 2.5h6v2h-2v4.1a6 6 0 0 1 4.2 5.7v2.2H6.8v-2.2a6 6 0 0 1 4.2-5.7V4.5H9v-2z" />
+                <path fill="#ffb84d" d="M11 15.6h2v2.2h-2z" />
+                <path fill="#173e3a" d="M10.2 18.6h3.6l-.5 2.2h-2.6z" />
+              </svg>
+              <strong>灯下</strong>
+            </div>
+            <span>本地文稿 · 完整读懂、按习惯拆课、逐句讲解与学习总结</span>
           </div>
-          <span>本地文稿 · 完整读懂、按习惯拆课、逐句讲解与学习总结</span>
-        </div>
-        <div className="top-side">
-          <div className="row">
-            <nav className="tabs">
-              <button className={`tab ${view === 'doc' ? 'active' : ''}`} onClick={() => setView('doc')}>文稿</button>
-              <button className={`tab ${view === 'study' ? 'active' : ''}`} onClick={() => setView('study')}>AI 私教</button>
-              <button className={`tab ${view === 'review' ? 'active' : ''}`} onClick={() => setView('review')}>复习</button>
-            </nav>
-            <button className="ghost" onClick={() => void openAi()}>模型{aiStatus?.configured ? ' · 已配置' : ''}</button>
+          <div className="top-side">
+            <div className="row">
+              <nav className="tabs">
+                <button className={`tab ${view === 'doc' ? 'active' : ''}`} onClick={() => setView('doc')}>文稿</button>
+                <button className={`tab ${view === 'study' ? 'active' : ''}`} onClick={() => setView('study')}>AI 私教</button>
+                <button className={`tab ${view === 'review' ? 'active' : ''}`} onClick={() => setView('review')}>复习</button>
+              </nav>
+              <button className="ghost" onClick={() => void openAi()}>模型{aiStatus?.configured ? ' · 已配置' : ''}</button>
+            </div>
+            <p className="quiet">没有账号，没有云同步；模型只用你自己填的那一个。</p>
           </div>
-          <p className="quiet">没有账号，没有云同步；模型只用你自己填的那一个。</p>
+        </header>
+        <div className="top-search">
+          <span className="top-search-icon" aria-hidden="true">⌕</span>
+          <input
+            ref={searchRef}
+            value={globalQuery}
+            onChange={(event) => {
+              setGlobalQuery(event.target.value)
+              setSearchOpen(true)
+            }}
+            onFocus={() => setSearchOpen(true)}
+            placeholder="搜全文、页面文字、知识点…"
+            spellCheck={false}
+            aria-label="全文搜索"
+          />
+          <span className="top-search-key">Ctrl K</span>
+          {searchOpen && (globalQuery.trim() || searchBusy) ? (
+            <div className="search-panel">
+              <div className="search-panel-head">
+                <span>{searchBusy ? '正在找…' : searchHits.length ? `找到 ${searchHits.length} 处` : '没有找到'}</span>
+                <button className="link-btn" onClick={() => setSearchOpen(false)}>关闭</button>
+              </div>
+              {!searchBusy && searchHits.length === 0 ? (
+                <p className="empty">换一个词试试。搜索会查正文和页面文字，点结果直接跳到那一页。</p>
+              ) : null}
+              {searchHits.map((hit) => (
+                <button key={`${hit.blockId}-${hit.snippet}`} className="search-hit" onClick={() => void openSearchHit(hit)}>
+                  <span className="search-hit-title">{hit.displayName}<small>{hit.pageNumber ? `第 ${hit.pageNumber} 页` : '未分页'}</small></span>
+                  <span className="search-hit-snippet">{hit.snippet}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
-      </header>
-      {notice ? <div className={`banner ${notice.tone === 'bad' ? 'bad' : 'info'}`} style={{ margin: '0 20px 12px' }}>{notice.text}</div> : null}
+        {notice ? <div className={`banner ${notice.tone === 'bad' ? 'bad' : 'info'}`}>{notice.text}</div> : null}
+      </div>
       <div className={`shell ${view === 'doc' ? '' : 'two'}${libraryOpen ? '' : ' library-collapsed'}`}>
         <aside className={`panel library${libraryOpen ? '' : ' collapsed'}`}>
           {libraryOpen ? (
@@ -841,7 +1057,7 @@ export function App() {
                         {pageReadings.map((item) => (
                           <div key={item.kind} className="reading">
                             <h4>{item.kind === 'ocr' ? '本机 OCR（备用）' : 'AI 读懂'} <span className="chip">{item.engine}</span></h4>
-                            <p>{item.text}</p>
+                            <p><MathText text={item.text} /></p>
                           </div>
                         ))}
                       </div>
@@ -878,12 +1094,37 @@ export function App() {
                       <span>第 {page.ordinal} / {pages.length} 页 · {page.status === 'needs_review' ? '需复核' : '页面已渲染'}</span>
                       <button className="ghost" disabled={pageIndex >= pages.length - 1} onClick={() => setPageIndex((index) => index + 1)}>下一页</button>
                     </div>
+                    {pageBlocks.length ? (
+                      <section className="page-text">
+                        <header className="page-text-head">
+                          <h3>本页文字</h3>
+                          <span>选中一段可以高亮或摘录成卡</span>
+                        </header>
+                        {pageBlocks.map((block) => (
+                          <HighlightText
+                            key={block.blockId}
+                            block={block}
+                            highlights={highlights}
+                            focused={focus?.blockId === block.blockId}
+                            onSelect={(selected) => setSelection(selected ? { ...selected, block } : null)}
+                            onDeleteHighlight={(id) => void removeHighlight(id)}
+                          />
+                        ))}
+                      </section>
+                    ) : null}
                   </>
                 ) : (
                   <div className="transcript">
                     {unpaged.length === 0 ? <p className="empty">这份文稿没有页面，也没有可显示的段落。</p> : null}
                     {unpaged.map((block) => (
-                      <p key={block.blockId} id={`block-${block.blockId}`} className={`block ${block.kind} ${focus?.blockId === block.blockId ? 'focus' : ''}`}>{block.text}</p>
+                      <HighlightText
+                        key={block.blockId}
+                        block={block}
+                        highlights={highlights}
+                        focused={focus?.blockId === block.blockId}
+                        onSelect={(selected) => setSelection(selected ? { ...selected, block } : null)}
+                        onDeleteHighlight={(id) => void removeHighlight(id)}
+                      />
                     ))}
                   </div>
                 )}
@@ -893,7 +1134,14 @@ export function App() {
                     <p className="quiet">这些锚点来自源文件结构。它们没有被自动安到某一渲染页上。</p>
                     <div className="transcript">
                       {unpaged.map((block) => (
-                        <p key={block.blockId} id={`block-${block.blockId}`} className={`block ${focus?.blockId === block.blockId ? 'focus' : ''}`}>{block.text}</p>
+                        <HighlightText
+                          key={block.blockId}
+                          block={block}
+                          highlights={highlights}
+                          focused={focus?.blockId === block.blockId}
+                          onSelect={(selected) => setSelection(selected ? { ...selected, block } : null)}
+                          onDeleteHighlight={(id) => void removeHighlight(id)}
+                        />
                       ))}
                     </div>
                   </div>
@@ -1047,6 +1295,106 @@ export function App() {
                 <span className="quiet">不含 API 密钥，也不含临时解析目录。</span>
               </div>
               {backup ? <p className="quiet">上次备份：{backup.path}（{backup.files} 个文件，{formatBytes(backup.bytes)}）</p> : null}
+              {appSettings ? (
+                <div className="settings-subblock">
+                  <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label className="goal-check">
+                      <input
+                        type="checkbox"
+                        checked={appSettings.backup.enabled}
+                        onChange={(event) => {
+                          const enabled = event.target.checked
+                          setAppSettings((current) => (current ? { ...current, backup: { ...current.backup, enabled } } : current))
+                          void saveDataSettings({ backup: { enabled } })
+                        }}
+                      />
+                      每天自动备份一次
+                    </label>
+                    <span className="quiet">保留
+                      <input
+                        className="inline-number"
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={appSettings.backup.keep}
+                        onChange={(event) => {
+                          const keep = Math.max(1, Math.min(30, Number(event.target.value) || 1))
+                          setAppSettings((current) => (current ? { ...current, backup: { ...current.backup, keep } } : current))
+                          void saveDataSettings({ backup: { keep } })
+                        }}
+                      /> 份
+                    </span>
+                  </div>
+                  <div className="row">
+                    <button className="ghost" disabled={dataBusy} onClick={() => void chooseBackupDirectory()}>选择自动备份文件夹</button>
+                    <span className="quiet">{appSettings.backup.directory || '还没选目录'} {appSettings.backup.lastAt ? `· 上次 ${new Date(appSettings.backup.lastAt).toLocaleString('zh-CN')}` : ''}</span>
+                  </div>
+                  <div className="row">
+                    <button className="ghost" disabled={restoreBusy} onClick={() => void inspectRestore()}>
+                      {restoreBusy ? '正在检查备份…' : '从备份恢复…'}
+                    </button>
+                    <span className="quiet">会先给你看备份里有多少东西，再让你确认。</span>
+                  </div>
+                  {restorePreview ? (
+                    <div className="restore-card">
+                      <p><b>备份版本 {restorePreview.version}</b> · {restorePreview.createdAt ? new Date(restorePreview.createdAt).toLocaleString('zh-CN') : '时间未知'}</p>
+                      <p className="quiet">{restorePreview.counts.documents} 份文稿 · {restorePreview.counts.pages} 页 · {restorePreview.counts.cards + restorePreview.counts.manualCards} 张卡 · {restorePreview.counts.misses} 道错题 · {restorePreview.counts.highlights} 条高亮</p>
+                      <p className="warning">恢复会用这个备份覆盖当前整库；旧库会改名留作回滚，应用随后自动重启。模型 API Key 保留本机的。</p>
+                      <div className="row">
+                        <button className="primary" disabled={restoreBusy} onClick={() => void applyRestore()}>{restoreBusy ? '正在恢复…' : '确认覆盖并重启'}</button>
+                        <button className="ghost" onClick={() => setRestorePreview(null)}>取消</button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
+            <section className="settings-block">
+              <h3>AI 用量护栏</h3>
+              {appSettings ? (
+                <>
+                  <p className="quiet">按自然月累计「输入 + 输出」token。填 0 表示关闭；超过上限时默认直接拦住下一次模型调用。</p>
+                  <div className="row" style={{ alignItems: 'center' }}>
+                    <label>每月上限
+                      <input
+                        type="number"
+                        min={0}
+                        max={100000000}
+                        step={10000}
+                        value={appSettings.budget.monthlyTokens}
+                        onChange={(event) => {
+                          const monthlyTokens = Math.max(0, Math.min(100000000, Number(event.target.value) || 0))
+                          setAppSettings((current) => (current ? { ...current, budget: { ...current.budget, monthlyTokens } } : current))
+                        }}
+                      />
+                      tokens
+                    </label>
+                    <label className="goal-check">
+                      <input
+                        type="checkbox"
+                        checked={appSettings.budget.hardStop}
+                        onChange={(event) => {
+                          const hardStop = event.target.checked
+                          setAppSettings((current) => (current ? { ...current, budget: { ...current.budget, hardStop } } : current))
+                        }}
+                      />
+                      到上限硬拦截
+                    </label>
+                    <button className="ghost" disabled={dataBusy} onClick={() => void saveDataSettings({ budget: appSettings.budget })}>保存护栏</button>
+                  </div>
+                  {appSettings.budgetStatus.limit > 0 ? (
+                    <>
+                      <div className={`budget-bar ${appSettings.budgetStatus.exceeded ? 'bad' : appSettings.budgetStatus.warned ? 'warn' : ''}`}>
+                        <span style={{ width: `${Math.min(100, appSettings.budgetStatus.percent)}%` }} />
+                      </div>
+                      <p className="quiet">
+                        本月已用 {formatNumber(appSettings.budgetStatus.used)} / {formatNumber(appSettings.budgetStatus.limit)} tokens（{appSettings.budgetStatus.percent}%），还剩 {formatNumber(appSettings.budgetStatus.remaining)}。
+                        {appSettings.budgetStatus.exceeded ? ' 已到上限。' : ''}
+                      </p>
+                    </>
+                  ) : <p className="quiet">护栏已关闭。</p>}
+                </>
+              ) : <p className="quiet">正在读取本机设置…</p>}
             </section>
             <div className="app-update">
               <div className="row">
@@ -1072,6 +1420,37 @@ export function App() {
               {updateProgress && updateDownloading ? (
                 <div className="progress"><span style={{ width: `${updateProgress.percent}%` }} /></div>
               ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {selection ? (
+        <div className="selection-toolbar" style={{ left: selection.x, top: selection.y }}>
+          <span>已选 {selection.quote.length} 字</span>
+          <button className="primary" onMouseDown={(event) => event.preventDefault()} onClick={() => void addHighlight()}>高亮</button>
+          <button className="ghost" onMouseDown={(event) => event.preventDefault()} onClick={startExcerpt}>摘录成卡</button>
+          <button className="link-btn" onClick={() => setSelection(null)}>取消</button>
+        </div>
+      ) : null}
+      {excerpt ? (
+        <div className="modal-overlay" onClick={() => setExcerpt(null)}>
+          <div className="modal-card excerpt-card" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <h2>摘录成卡</h2>
+              <button className="icon-btn" onClick={() => setExcerpt(null)}>×</button>
+            </header>
+            <p className="excerpt-source">{excerpt.quote}</p>
+            <label>
+              正面（问题）
+              <input value={excerpt.front} maxLength={500} onChange={(event) => setExcerpt((current) => (current ? { ...current, front: event.target.value } : current))} />
+            </label>
+            <label>
+              背面（答案，可留空）
+              <textarea value={excerpt.back} maxLength={1000} rows={4} onChange={(event) => setExcerpt((current) => (current ? { ...current, back: event.target.value } : current))} />
+            </label>
+            <div className="row">
+              <button className="primary" disabled={excerptBusy} onClick={() => void saveExcerpt()}>{excerptBusy ? '保存中…' : '保存卡片'}</button>
+              <button className="ghost" onClick={() => setExcerpt(null)}>取消</button>
             </div>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { nowIso } from '../domain/ids'
+import { searchIndexText } from '../shared/search'
 import { AppDatabase } from './database'
 
 const BASE_SCHEMA = `
@@ -313,6 +314,100 @@ CREATE TABLE study_checks (
 CREATE INDEX idx_study_checks_session ON study_checks(session_id, unit_ordinal);
 `
 
+const CARD_NOTE_SCHEMA = `
+ALTER TABLE lecture_cards ADD COLUMN suspended INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX idx_lecture_cards_suspended ON lecture_cards(suspended, due);
+
+CREATE TABLE manual_cards (
+  id TEXT PRIMARY KEY,
+  front TEXT NOT NULL,
+  back TEXT NOT NULL DEFAULT '',
+  box INTEGER NOT NULL DEFAULT 0,
+  due INTEGER NOT NULL,
+  suspended INTEGER NOT NULL DEFAULT 0,
+  last_graded_at TEXT NULL,
+  document_version_id TEXT NULL,
+  page_id TEXT NULL,
+  quote TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_manual_cards_due ON manual_cards(suspended, due);
+CREATE INDEX idx_manual_cards_version ON manual_cards(document_version_id);
+
+CREATE TABLE highlights (
+  id TEXT PRIMARY KEY,
+  document_version_id TEXT NOT NULL REFERENCES document_versions(id) ON DELETE CASCADE,
+  page_id TEXT NULL,
+  block_id TEXT NOT NULL REFERENCES blocks(id) ON DELETE CASCADE,
+  start_offset INTEGER NOT NULL,
+  end_offset INTEGER NOT NULL,
+  quote TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT 'yellow',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_highlights_version ON highlights(document_version_id, created_at);
+CREATE INDEX idx_highlights_block ON highlights(block_id, start_offset);
+
+ALTER TABLE misses ADD COLUMN box INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE misses ADD COLUMN due INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE misses ADD COLUMN last_graded_at TEXT NULL;
+CREATE INDEX idx_misses_due ON misses(due);
+`
+
+const SEARCH_SCHEMA = `
+CREATE VIRTUAL TABLE search_index USING fts5(
+  document_version_id UNINDEXED,
+  document_id UNINDEXED,
+  page_id UNINDEXED,
+  block_id UNINDEXED,
+  page_number UNINDEXED,
+  kind UNINDEXED,
+  body UNINDEXED,
+  text,
+  tokenize='unicode61'
+);
+`
+
+function backfillSearch(db: AppDatabase): void {
+  // 测试里存在只补到 v1 极简 schema 的旧库；没有 blocks 就不索引，不能让迁移失败。
+  const blocks = db.get<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'blocks'")
+  if (!blocks) return
+  const rows = db.all<{
+    document_version_id: string
+    document_id: string
+    page_id: string | null
+    block_id: string
+    page_number: number
+    kind: string
+    body: string
+  }>(
+    `SELECT b.document_version_id, v.document_id, b.page_id, b.id AS block_id,
+            COALESCE(p.ordinal, 0) AS page_number, b.kind, b.text AS body
+     FROM blocks b
+     JOIN document_versions v ON v.id = b.document_version_id
+     LEFT JOIN pages p ON p.id = b.page_id`,
+  )
+  for (const row of rows) {
+    db.run(
+      `INSERT INTO search_index(document_version_id, document_id, page_id, block_id, page_number, kind, body, text)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      row.document_version_id,
+      row.document_id,
+      row.page_id,
+      row.block_id,
+      row.page_number,
+      row.kind,
+      row.body,
+      searchIndexText(row.body),
+    )
+  }
+}
+
+/** 恢复旧备份时用它判断备份 schema 是否比当前应用新。 */
+export const CURRENT_SCHEMA_VERSION = 10
+
 const COST_SCHEMA = `
 CREATE TABLE material_digests (
   document_version_id TEXT PRIMARY KEY REFERENCES document_versions(id) ON DELETE CASCADE,
@@ -397,6 +492,21 @@ export function migrate(db: AppDatabase): void {
       db.exec('ALTER TABLE lecture_cards ADD COLUMN last_graded_at TEXT NULL')
       db.exec('CREATE INDEX idx_lecture_cards_graded ON lecture_cards(last_graded_at)')
       db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 8, nowIso())
+    })
+  }
+  if (!hasVersion(db, 9)) {
+    db.transaction(() => {
+      // 卡片暂停、手动卡、划词高亮、错题重练的调度字段。
+      db.exec(CARD_NOTE_SCHEMA)
+      db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 9, nowIso())
+    })
+  }
+  if (!hasVersion(db, 10)) {
+    db.transaction(() => {
+      // FTS5 只索引正文块；其他列带 UNINDEXED 作为跳转定位信息。
+      db.exec(SEARCH_SCHEMA)
+      backfillSearch(db)
+      db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 10, nowIso())
     })
   }
 }

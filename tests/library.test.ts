@@ -95,7 +95,7 @@ describe('文稿整理、复习统计与备份', () => {
     const snapshot = AppDatabase.open(path.join(target, 'library.sqlite'))
     try {
       expect(snapshot.get<{ total: number }>('SELECT COUNT(*) AS total FROM documents')?.total).toBe(1)
-      expect(snapshot.get<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')?.version).toBe(8)
+      expect(snapshot.get<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')?.version).toBe(10)
     } finally {
       snapshot.close()
     }

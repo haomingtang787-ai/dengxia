@@ -1,6 +1,8 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 
 export class AppDatabase {
+  private closed = false
+
   private constructor(private readonly db: DatabaseSync) {}
 
   static open(file: string): AppDatabase {
@@ -70,6 +72,8 @@ export class AppDatabase {
   }
 
   close(): void {
+    if (this.closed) return
+    this.closed = true
     this.db.close()
   }
 }

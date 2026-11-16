@@ -26,6 +26,9 @@ export type Miss = {
   prompt: string;
   explain: string;
   at: number;
+  box?: number;
+  due?: number;
+  lastGradedAt?: string | null;
 };
 
 export type DeskView = "talk" | "today" | "courses" | "class" | "knowledge" | "review";

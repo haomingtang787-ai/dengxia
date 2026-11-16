@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DocumentListItem } from '../../shared/contract'
 import type { StudyCheck, StudyProgress, StudySessionDetail, StudySessionListItem, StudyUnit } from '../../shared/study'
+import { MathText } from '../components/MathText'
 import {
   AVOID_OPTIONS,
   DEFAULT_HABITS,
@@ -449,7 +450,7 @@ export function StudyView({
                     {detail.messages.map((message) => (
                       <div key={message.id} className={`study-message ${message.role}`}>
                         <span className="study-message-role">{message.role === 'user' ? '你' : '老师'}</span>
-                        <p>{message.content}</p>
+                        <p><MathText text={message.content} /></p>
                       </div>
                     ))}
                     {busy === 'send' ? <div className="study-message assistant pending"><span className="study-message-role">老师</span><p>正在结合本讲和整门课回答…</p></div> : null}
@@ -572,11 +573,11 @@ function UnitSheet({
           return (
             <section key={`${unit.id}-${index}`} className="study-segment">
               <blockquote>{segment.source}</blockquote>
-              <p>{segment.explain}</p>
+              <p><MathText text={segment.explain} /></p>
               {segment.check ? (
                 <div className="study-check">
                   <b>停一下</b>
-                  <span>{segment.check}</span>
+                  <span><MathText text={segment.check} /></span>
                   <textarea
                     rows={2}
                     value={drafts[index] ?? saved?.answer ?? ''}

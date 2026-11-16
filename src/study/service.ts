@@ -33,6 +33,7 @@ export type StudyServiceOptions = {
   images: Pick<ImageService, 'vision' | 'ocr' | 'visionEmbedded'>
   habits: () => Habits
   fetchImpl?: typeof fetch
+  budget?: import('../ai/budget').BudgetService
   onProgress?: (progress: StudyProgress) => void
 }
 
@@ -640,7 +641,7 @@ export class StudyService {
     // 82 页课件的拆课 JSON 可能要两三分钟才能吐完，120 秒会把长课件拦腰打断。
     return new AiClient(ai, this.options.fetchImpl ?? globalThis.fetch, 300_000, (kind, usage) => {
       this.recordUsage(kind, usage)
-    })
+    }, () => this.options.budget?.beforeCall())
   }
 
   /** token 用量落库：口径见 ai_usage；cached_tokens 是 DeepSeek 前缀缓存命中的部分。 */
