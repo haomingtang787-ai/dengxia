@@ -18,7 +18,7 @@ extraResources:
 win:
   target:
     - nsis
-  signAndEditExecutable: false
+  signAndEditExecutable: true
   icon: build/icon.ico
 nsis:
   oneClick: false
