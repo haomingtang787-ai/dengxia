@@ -1,5 +1,7 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, Notification, dialog } from 'electron'
+import fs from 'node:fs'
+import path from 'node:path'
 import type { AiService } from '../ai/service'
 import { ArgumentError } from '../domain/validation'
 import { DocumentService } from '../documents/service'
@@ -7,7 +9,7 @@ import type { ImageService } from '../images/service'
 import type { TeachingService } from '../teaching/service'
 import type { StudyService } from '../study/service'
 import type { AppInfoService } from '../app/info'
-import { fail } from '../shared/contract'
+import { ok, fail, type Result, type SaveTextResult } from '../shared/contract'
 import { IpcChannel, IPC_INVOKE_CHANNELS, type IpcInvokeChannel } from '../shared/ipc'
 import { randomUUID } from 'node:crypto'
 
@@ -46,6 +48,13 @@ export function registerIpc(
   bind(IpcChannel.documentsBlocks, (_event, body) => service.blocks(body))
   bind(IpcChannel.documentsOpenSource, (event, body) => service.openSource(windowIdFrom(event), body))
   bind(IpcChannel.documentsDelete, (_event, body) => service.delete(body))
+  bind(IpcChannel.documentsRename, (_event, body) => service.rename(body))
+  bind(IpcChannel.documentsPin, (_event, body) => service.pin(body))
+  bind(IpcChannel.reviewSettingsGet, () => service.reviewSettings())
+  bind(IpcChannel.reviewSettingsSave, (_event, body) => service.saveReviewSettings(body))
+  bind(IpcChannel.dataStorage, () => service.storage())
+  bind(IpcChannel.dataStats, () => service.stats())
+  bind(IpcChannel.dataBackup, (event) => service.backup(windowIdFrom(event)))
   bind(IpcChannel.jobsGet, (_event, body) => service.job(body))
   bind(IpcChannel.jobsCancel, (_event, body) => service.cancel(body))
   bind(IpcChannel.jobsRetry, (_event, body) => service.retry(body))
@@ -65,6 +74,9 @@ export function registerIpc(
   bind(IpcChannel.teachingMisses, (_event, body) => teaching.misses(body))
   bind(IpcChannel.teachingToday, () => teaching.today())
   bind(IpcChannel.teachingNote, (_event, body) => teaching.note(body))
+  bind(IpcChannel.teachingReviewSummary, () => teaching.reviewSummary())
+  bind(IpcChannel.teachingExportCards, () => teaching.exportCards())
+  bind(IpcChannel.teachingExportMisses, () => teaching.exportMisses())
   bind(IpcChannel.aiStatus, () => ai.status())
   bind(IpcChannel.aiSaveConfig, (_event, body) => ai.saveConfig(body))
   bind(IpcChannel.aiTest, () => ai.testConfig())
@@ -87,5 +99,43 @@ export function registerIpc(
   bind(IpcChannel.studyDelete, (_event, body) => study.deleteCourse(body))
   bind(IpcChannel.appInfo, () => appInfo.info())
   bind(IpcChannel.appCheckUpdate, () => appInfo.checkUpdate())
+  bind(IpcChannel.appSaveText, (event, body) => saveText(event, body))
+  bind(IpcChannel.appNotify, (_event, body) => notify(body))
+  bind(IpcChannel.appDownloadUpdate, (event, body) =>
+    appInfo.downloadUpdate(body, (channel, payload) => event.sender.send(channel, payload)))
+  bind(IpcChannel.appOpenUpdate, (_event, body) => appInfo.openUpdate(body))
   return [...IPC_INVOKE_CHANNELS]
+}
+
+async function saveText(event: IpcMainInvokeEvent, body: unknown): Promise<Result<SaveTextResult>> {
+  const requestId = randomUUID()
+  const raw = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const fileName = typeof raw.fileName === 'string' ? path.basename(raw.fileName).slice(0, 80) : ''
+  const content = typeof raw.content === 'string' ? raw.content : ''
+  if (!fileName || !content) return fail(requestId, 'INVALID_ARGUMENT', '没有可保存的内容。')
+  if (content.length > 10_000_000) return fail(requestId, 'LIMIT_EXCEEDED', '导出内容太大了。')
+  const extension = path.extname(fileName).toLowerCase()
+  const filters = extension === '.md'
+    ? [{ name: 'Markdown', extensions: ['md'] }]
+    : extension === '.txt'
+      ? [{ name: '文本', extensions: ['txt'] }]
+      : undefined
+  const parent = BrowserWindow.fromWebContents(event.sender)
+  const result = parent
+    ? await dialog.showSaveDialog(parent, { defaultPath: fileName, filters })
+    : await dialog.showSaveDialog({ defaultPath: fileName, filters })
+  if (result.canceled || !result.filePath) return ok<SaveTextResult>(requestId, { saved: false, path: null })
+  await fs.promises.writeFile(result.filePath, content, 'utf8')
+  return ok<SaveTextResult>(requestId, { saved: true, path: result.filePath })
+}
+
+function notify(body: unknown): Result<{ shown: boolean }> {
+  const requestId = randomUUID()
+  const raw = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, 80) : ''
+  const text = typeof raw.body === 'string' ? raw.body.trim().slice(0, 500) : ''
+  if (!title || !text) return fail(requestId, 'INVALID_ARGUMENT', '通知内容为空。')
+  if (!Notification.isSupported()) return ok(requestId, { shown: false })
+  new Notification({ title, body: text }).show()
+  return ok(requestId, { shown: true })
 }

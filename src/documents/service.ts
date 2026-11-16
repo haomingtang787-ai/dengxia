@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { ArgumentError, parseBlocksQuery, parseImportBody, parseJobIdBody, parseLocator, parsePagination, parseRetryBody, parseVersionBody } from '../domain/validation'
+import { ArgumentError, parseBlocksQuery, parseImportBody, parseJobIdBody, parseLocator, parsePagination, parsePinBody, parseRenameBody, parseRetryBody, parseReviewSettings, parseVersionBody } from '../domain/validation'
 import { canRetryJob, isTerminalJob } from '../domain/jobs'
 import { nowIso } from '../domain/ids'
 import { MESSAGES, LIMITS, PARSER_VERSION, type Limits } from '../shared/constants'
@@ -11,6 +11,7 @@ import {
   ok,
   type BlockList,
   type BlockView,
+  type BackupResult,
   type DeleteDocumentResult,
   type DocumentDetail,
   type DocumentList,
@@ -18,6 +19,7 @@ import {
   type JobChangedEvent,
   type JobSnapshot,
   type JobState,
+  type LibraryStats,
   type Locator,
   type OpenSourceResult,
   type PageList,
@@ -25,7 +27,9 @@ import {
   type Prerequisites,
   type PreviewFocus,
   type Result,
+  type ReviewSettingsView,
   type ReviewState,
+  type StorageUsage,
 } from '../shared/contract'
 import { safeDisplayName, safeStoredName, sanitizeDocumentText } from '../shared/text'
 import type { OfficeGateway } from '../providers/officeGateway'
@@ -46,6 +50,8 @@ import type { ParseResult, ParseTask, ProgressReport } from './parseTypes'
 export interface NativeDialogs {
   pickDocuments(windowId: string): Promise<{ cancelled: boolean; files: Array<{ path: string; name: string; sizeBytes: number }> }>
   pickExecutable(windowId: string): Promise<{ cancelled: boolean; path: string | null }>
+  /** 备份时选一个文件夹；取消返回 null。 */
+  pickDirectory?(windowId: string, title: string): Promise<string | null>
 }
 
 export interface DeskEvents {
@@ -76,6 +82,8 @@ export class DocumentService {
       limits?: Limits
       repair?: boolean
       recheckIsolation?: () => Promise<void>
+      /** 备份清单里记录的应用版本；测试里可缺省。 */
+      version?: () => string
     },
   ) {
     this.store = new Store(options.db)
@@ -145,11 +153,22 @@ export class DocumentService {
     const requestId = randomUUID()
     try {
       const page = parsePagination(body ?? {})
-      const total = this.store.countDocuments()
-      const rows = this.store.listDocuments(page.offset, page.limit)
+      const source = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+      const query = typeof source.query === 'string' ? source.query.trim().slice(0, 80) : ''
+      const format = typeof source.format === 'string' && (DOCUMENT_FORMATS as readonly string[]).includes(source.format)
+        ? source.format
+        : null
+      const rows = this.store.queryDocuments(query, format)
+      const pinnedIds = new Set(this.options.settings.load().pinnedDocumentIds)
+      const ordered = rows.slice().sort((a, b) => {
+        const aPinned = pinnedIds.has(a.document_id)
+        const bPinned = pinnedIds.has(b.document_id)
+        if (aPinned !== bPinned) return aPinned ? -1 : 1
+        return b.created_at.localeCompare(a.created_at) || b.document_id.localeCompare(a.document_id)
+      })
       return ok(requestId, {
-        total,
-        items: rows.map((row) => ({
+        total: ordered.length,
+        items: ordered.slice(page.offset, page.offset + page.limit).map((row) => ({
           documentId: row.document_id,
           documentVersionId: row.document_version_id,
           displayName: row.display_name,
@@ -158,6 +177,7 @@ export class DocumentService {
           status: row.status,
           createdAt: row.created_at,
           sha256: row.sha256,
+          pinned: pinnedIds.has(row.document_id),
           job: row.job_id
             ? {
                 jobId: row.job_id,
@@ -169,6 +189,142 @@ export class DocumentService {
               }
             : null,
         })),
+      })
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  rename(body: unknown): Result<{ documentId: string; displayName: string }> {
+    const requestId = randomUUID()
+    try {
+      const parsed = parseRenameBody(body)
+      const version = this.store.getVersion(parsed.documentVersionId)
+      if (!version) return fail(requestId, 'NOT_FOUND', '没有这份文稿。')
+      this.store.renameDocument(version.document_id, parsed.displayName)
+      return ok(requestId, { documentId: version.document_id, displayName: parsed.displayName })
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  pin(body: unknown): Result<{ pinned: boolean }> {
+    const requestId = randomUUID()
+    try {
+      const parsed = parsePinBody(body)
+      const version = this.store.getVersion(parsed.documentVersionId)
+      if (!version) return fail(requestId, 'NOT_FOUND', '没有这份文稿。')
+      const settings = this.options.settings.load()
+      const pinned = new Set(settings.pinnedDocumentIds)
+      if (parsed.pinned) pinned.add(version.document_id)
+      else pinned.delete(version.document_id)
+      this.options.settings.save({ ...settings, pinnedDocumentIds: [...pinned].slice(0, 200) })
+      return ok(requestId, { pinned: parsed.pinned })
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  reviewSettings(): Result<ReviewSettingsView> {
+    const requestId = randomUUID()
+    try {
+      return ok(requestId, this.options.settings.load().review)
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  saveReviewSettings(body: unknown): Result<ReviewSettingsView> {
+    const requestId = randomUUID()
+    try {
+      const review = parseReviewSettings(body)
+      const settings = this.options.settings.load()
+      this.options.settings.save({ ...settings, review })
+      return ok(requestId, review)
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  stats(): Result<LibraryStats> {
+    const requestId = randomUUID()
+    try {
+      return ok(requestId, this.store.stats())
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  storage(): Result<StorageUsage> {
+    const requestId = randomUUID()
+    try {
+      const counts = this.store.stats()
+      const databaseBytes = fileBytes(path.join(this.options.root, 'library.sqlite'))
+      const originalsBytes = directoryBytes(path.join(this.options.root, 'originals'))
+      const artifactsBytes = directoryBytes(path.join(this.options.root, 'artifacts'))
+      return ok(requestId, {
+        databaseBytes,
+        originalsBytes,
+        artifactsBytes,
+        totalBytes: databaseBytes + originalsBytes + artifactsBytes,
+        documents: counts.documents,
+        pages: counts.pages,
+        blocks: counts.blocks,
+      })
+    } catch (error) {
+      return this.asFailure(requestId, error)
+    }
+  }
+
+  /** 把整库（不含 API key 与临时解析目录）复制到用户选的文件夹。 */
+  async backup(windowId: string): Promise<Result<BackupResult>> {
+    const requestId = randomUUID()
+    try {
+      const chosen = await this.options.dialogs.pickDirectory?.(windowId, '选择备份保存位置')
+      if (!chosen) return fail(requestId, 'CONFLICT', '没有选择备份位置。')
+      const stamp = backupStamp(new Date())
+      let destination = path.join(chosen, `灯下备份-${stamp}`)
+      for (let suffix = 2; fs.existsSync(destination) && suffix < 100; suffix += 1) {
+        destination = path.join(chosen, `灯下备份-${stamp}-${suffix}`)
+      }
+      try {
+        this.options.db.run('PRAGMA wal_checkpoint(TRUNCATE)')
+      } catch {
+        /* 备份仍可继续；只是 WAL 未截断。 */
+      }
+      // VACUUM INTO 生成一份一致、无 WAL 的库快照；直接拷 .sqlite 可能与 WAL 不同步。
+      await fs.promises.mkdir(destination, { recursive: true })
+      const databaseFile = path.join(destination, 'library.sqlite')
+      this.options.db.exec(`VACUUM INTO '${databaseFile.replace(/'/g, "''")}'`)
+      for (const name of ['originals', 'artifacts']) {
+        const source = path.join(this.options.root, name)
+        if (fs.existsSync(source)) {
+          await fs.promises.cp(source, path.join(destination, name), { recursive: true })
+        }
+      }
+      const counts = this.store.stats()
+      const manifest = {
+        product: '灯下',
+        version: this.options.version?.() ?? 'unknown',
+        createdAt: nowIso(),
+        counts: {
+          documents: counts.documents,
+          pages: counts.pages,
+          cards: counts.cards,
+          misses: counts.misses,
+        },
+        note: '备份不含 settings.json（模型 API Key 留在本机）；恢复时把本文件夹内容复制回用户数据目录的 library 下即可。',
+      }
+      await fs.promises.writeFile(path.join(destination, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8')
+      const walk = walkDirectory(destination)
+      return ok(requestId, {
+        path: destination,
+        bytes: walk.bytes,
+        files: walk.files,
+        documents: counts.documents,
+        pages: counts.pages,
+        cards: counts.cards,
+        misses: counts.misses,
       })
     } catch (error) {
       return this.asFailure(requestId, error)
@@ -235,6 +391,13 @@ export class DocumentService {
       }
       const jobIds = versions.flatMap((item) => this.store.listJobIds(item.id))
       const removed = this.store.deleteDocument(document.id)
+      const settings = this.options.settings.load()
+      if (settings.pinnedDocumentIds.includes(document.id)) {
+        this.options.settings.save({
+          ...settings,
+          pinnedDocumentIds: settings.pinnedDocumentIds.filter((id) => id !== document.id),
+        })
+      }
       for (const jobId of this.cancelRequested) {
         if (!this.store.getJob(jobId)) this.cancelRequested.delete(jobId)
       }
@@ -453,6 +616,19 @@ export class DocumentService {
     const format = detectFormat(held.name, header)
     if ((format === 'txt' || format === 'markdown') && stat.size > this.limits.maxTextFileBytes) {
       return fail(requestId, 'LIMIT_EXCEEDED', '文本文件超过本阶段的大小上限。')
+    }
+    const sourceHash = await hashFile(source)
+    const existing = this.store.latestVersionBySha(sourceHash.sha256)
+    if (existing) {
+      const document = this.store.getDocument(existing.document_id)
+      if (document) {
+        return ok(requestId, {
+          documentId: document.id,
+          documentVersionId: existing.id,
+          jobId: '',
+          duplicate: true,
+        })
+      }
     }
     const documentId = randomUUID()
     const versionId = randomUUID()
@@ -996,4 +1172,45 @@ async function readHeader(filePath: string): Promise<Uint8Array> {
   } finally {
     await handle.close()
   }
+}
+
+function fileBytes(file: string): number {
+  try {
+    return fs.statSync(file).size
+  } catch {
+    return 0
+  }
+}
+
+function directoryBytes(dir: string): number {
+  return walkDirectory(dir).bytes
+}
+
+function walkDirectory(rootDir: string): { bytes: number; files: number } {
+  let bytes = 0
+  let files = 0
+  const stack = [rootDir]
+  while (stack.length) {
+    const current = stack.pop() as string
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name)
+      if (entry.isDirectory()) stack.push(full)
+      else if (entry.isFile()) {
+        files += 1
+        bytes += fileBytes(full)
+      }
+    }
+  }
+  return { bytes, files }
+}
+
+function backupStamp(date: Date): string {
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
 }

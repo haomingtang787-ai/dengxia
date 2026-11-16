@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { ArgumentError } from '../domain/validation'
-import { fail, ok, type Result } from '../shared/contract'
+import { fail, ok, type ExportPayload, type Result } from '../shared/contract'
 import type {
   DayMarkView,
   DueCardList,
@@ -12,6 +12,7 @@ import type {
   MissList,
   MissItem,
   QuizAnswerResult,
+  ReviewSummary,
   TeachingCard,
   TeachingQuiz,
   TeachingSummary,
@@ -228,9 +229,53 @@ export class TeachingService {
       const row = this.store.card(lectureId, cardId)
       if (!row) throw new MissingError('找不到这张卡片。')
       const graded = gradeCard(this.card(row), remembered, this.clock())
-      this.store.updateCard(lectureId, cardId, graded.box, graded.due)
+      this.store.updateCard(lectureId, cardId, graded.box, graded.due, new Date(this.clock()).toISOString())
       this.bump('cards')
       return { card: graded, box: graded.box }
+    })
+  }
+
+  reviewSummary(): Result<ReviewSummary> {
+    return this.guard(() => {
+      const now = this.clock()
+      const dayStart = new Date(now)
+      dayStart.setHours(0, 0, 0, 0)
+      const dayEnd = new Date(dayStart)
+      dayEnd.setDate(dayEnd.getDate() + 1)
+      return {
+        due: this.store.dueCards(now).length,
+        reviewedToday: this.store.gradedBetween(dayStart.toISOString(), dayEnd.toISOString()),
+        misses: this.store.misses().length,
+      }
+    })
+  }
+
+  exportCards(): Result<ExportPayload> {
+    return this.guard(() => {
+      const rows = this.store.allCards()
+      const content = rows
+        .map((row) => `${oneLine(row.front)}\t${oneLine(row.back)}`)
+        .join('\n')
+      return { fileName: `灯下卡片-${localStamp(this.clock())}.txt`, content: content ? `${content}\n` : '' }
+    })
+  }
+
+  exportMisses(): Result<ExportPayload> {
+    return this.guard(() => {
+      const rows = this.store.misses()
+      const lines = ['# 灯下错题本', `导出时间：${new Date(this.clock()).toLocaleString('zh-CN', { hour12: false })}`, '']
+      if (!rows.length) lines.push('还没有错题。')
+      rows.forEach((row, index) => {
+        const lecture = this.store.lecture(row.lecture_id)
+        lines.push(`## ${index + 1}. ${row.prompt}`)
+        lines.push('')
+        if (lecture) lines.push(`- 来源：${lecture.title}`)
+        lines.push(`- 记录时间：${new Date(row.at).toLocaleString('zh-CN', { hour12: false })}`)
+        lines.push('')
+        lines.push(row.explain)
+        lines.push('')
+      })
+      return { fileName: `灯下错题-${localStamp(this.clock())}.md`, content: `${lines.join('\n').trimEnd()}\n` }
     })
   }
 
@@ -383,3 +428,13 @@ export class TeachingService {
 }
 
 export type { TeachingWeight }
+
+function oneLine(value: string): string {
+  return value.replace(/[\t\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim()
+}
+
+function localStamp(ms: number): string {
+  const date = new Date(ms)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`
+}

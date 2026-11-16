@@ -11,7 +11,7 @@ const desk = {
     pick: () => invoke<import('../shared/contract').PickResult>(IpcChannel.documentsPick, {}),
     import: (body: { handle: string; requestId: string }) =>
       invoke<import('../shared/contract').ImportResult>(IpcChannel.documentsImport, body),
-    list: (body: { offset?: number; limit?: number } = {}) =>
+    list: (body: { offset?: number; limit?: number; query?: string; format?: string } = {}) =>
       invoke<import('../shared/contract').DocumentList>(IpcChannel.documentsList, body),
     get: (body: { documentVersionId: string }) =>
       invoke<import('../shared/contract').DocumentDetail>(IpcChannel.documentsGet, body),
@@ -23,6 +23,20 @@ const desk = {
       invoke<import('../shared/contract').OpenSourceResult>(IpcChannel.documentsOpenSource, locator),
     delete: (body: { documentVersionId: string }) =>
       invoke<import('../shared/contract').DeleteDocumentResult>(IpcChannel.documentsDelete, body),
+    rename: (body: { documentVersionId: string; displayName: string }) =>
+      invoke<{ documentId: string; displayName: string }>(IpcChannel.documentsRename, body),
+    pin: (body: { documentVersionId: string; pinned: boolean }) =>
+      invoke<{ pinned: boolean }>(IpcChannel.documentsPin, body),
+  },
+  review: {
+    settings: () => invoke<import('../shared/contract').ReviewSettingsView>(IpcChannel.reviewSettingsGet, {}),
+    saveSettings: (body: import('../shared/contract').ReviewSettingsView) =>
+      invoke<import('../shared/contract').ReviewSettingsView>(IpcChannel.reviewSettingsSave, body),
+  },
+  data: {
+    storage: () => invoke<import('../shared/contract').StorageUsage>(IpcChannel.dataStorage, {}),
+    stats: () => invoke<import('../shared/contract').LibraryStats>(IpcChannel.dataStats, {}),
+    backup: () => invoke<import('../shared/contract').BackupResult>(IpcChannel.dataBackup, {}),
   },
   jobs: {
     get: (body: { jobId: string }) => invoke<import('../shared/contract').JobSnapshot>(IpcChannel.jobsGet, body),
@@ -66,6 +80,9 @@ const desk = {
     today: () => invoke<import('../shared/teaching').DayMarkView>(IpcChannel.teachingToday, {}),
     note: (body: { lectureId: string }) =>
       invoke<{ text: string }>(IpcChannel.teachingNote, body),
+    reviewSummary: () => invoke<import('../shared/teaching').ReviewSummary>(IpcChannel.teachingReviewSummary, {}),
+    exportCards: () => invoke<import('../shared/contract').ExportPayload>(IpcChannel.teachingExportCards, {}),
+    exportMisses: () => invoke<import('../shared/contract').ExportPayload>(IpcChannel.teachingExportMisses, {}),
   },
   ai: {
     status: () => invoke<import('../shared/ai').AiConfigView>(IpcChannel.aiStatus, {}),
@@ -136,6 +153,19 @@ const desk = {
   app: {
     info: () => invoke<import('../shared/app').AppInfo>(IpcChannel.appInfo, {}),
     checkUpdate: () => invoke<import('../shared/app').UpdateCheckResult>(IpcChannel.appCheckUpdate, {}),
+    saveText: (body: { fileName: string; content: string }) =>
+      invoke<import('../shared/contract').SaveTextResult>(IpcChannel.appSaveText, body),
+    notify: (body: { title: string; body: string }) =>
+      invoke<{ shown: boolean }>(IpcChannel.appNotify, body),
+    downloadUpdate: (body: { assetUrl: string; assetName: string; assetSize: number | null }) =>
+      invoke<import('../shared/app').UpdateDownloadResult>(IpcChannel.appDownloadUpdate, body),
+    openUpdate: (body: { filePath: string }) =>
+      invoke<{ opened: boolean }>(IpcChannel.appOpenUpdate, body),
+    onUpdateProgress: (callback: (progress: import('../shared/app').UpdateDownloadProgress) => void) => {
+      const listener = (_event: IpcRendererEvent, payload: import('../shared/app').UpdateDownloadProgress) => callback(payload)
+      ipcRenderer.on(IpcChannel.appUpdateProgress, listener)
+      return () => ipcRenderer.removeListener(IpcChannel.appUpdateProgress, listener)
+    },
   },
 }
 

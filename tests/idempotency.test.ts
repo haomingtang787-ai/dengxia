@@ -20,19 +20,21 @@ describe('idempotency', () => {
     await app.cleanup()
   })
 
-  it('does not merge two documents that happen to have the same hash', async () => {
+  it('reuses the existing document when the same file is imported twice', async () => {
     const app = await createHarness()
     const file = writeTemp('same.txt', SAMPLE_TXT)
     const first = await app.importFile(file)
     const second = await app.importFile(file)
     expect(first.ok && second.ok).toBe(true)
     if (!first.ok || !second.ok) return
-    expect(first.data.documentId).not.toBe(second.data.documentId)
+    expect(second.data.duplicate).toBe(true)
+    expect(second.data.documentId).toBe(first.data.documentId)
+    expect(second.data.documentVersionId).toBe(first.data.documentVersionId)
+    const listed = app.service.list({})
+    expect(listed.ok && listed.data.total).toBe(1)
     await app.service.settle()
     const left = app.service.get({ documentVersionId: first.data.documentVersionId })
-    const right = app.service.get({ documentVersionId: second.data.documentVersionId })
-    expect(left.ok && right.ok).toBe(true)
-    if (left.ok && right.ok) expect(left.data.sha256).toBe(right.data.sha256)
+    expect(left.ok).toBe(true)
     const digest = createHash('sha256').update(fs.readFileSync(file)).digest('hex')
     if (left.ok) expect(left.data.sha256).toBe(digest)
     await app.cleanup()

@@ -252,6 +252,39 @@ describe('授课服务（P2）', () => {
     expect(marks.data.quizzes).toBe(2)
   })
 
+  it('复习目标统计今天评过的卡，并能导出 Anki TSV 与错题 Markdown', async () => {
+    const created = await service.create(draft())
+    if (!created.ok) return
+    const lectureId = created.data.lectureId
+
+    const summaryBefore = await service.reviewSummary()
+    if (!summaryBefore.ok) return
+    expect(summaryBefore.data.reviewedToday).toBe(0)
+
+    const graded = await service.gradeCard({ lectureId, cardId: 'c1', remembered: true })
+    expect(graded.ok).toBe(true)
+    const summary = await service.reviewSummary()
+    if (!summary.ok) return
+    expect(summary.data.reviewedToday).toBe(1)
+    expect(summary.data.due).toBe(1)
+
+    const cards = await service.exportCards()
+    if (!cards.ok) return
+    const lines = cards.data.content.trim().split('\n')
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toContain('\t')
+    expect(cards.data.content).toContain('光反应在哪\t类囊体薄膜')
+
+    const wrong = await service.answerQuiz({ lectureId, quizId: 'q1', choice: 1 })
+    expect(wrong.ok).toBe(true)
+    const misses = await service.exportMisses()
+    if (!misses.ok) return
+    expect(misses.data.fileName.endsWith('.md')).toBe(true)
+    expect(misses.data.content).toContain('# 灯下错题本')
+    expect(misses.data.content).toContain('光反应发生在哪里？')
+    expect(misses.data.content).toContain('光反应在类囊体薄膜。')
+  })
+
   it('习惯可以保存，坏值被规范化', async () => {
     const saved = await service.saveHabits({
       name: '  小 明 ',

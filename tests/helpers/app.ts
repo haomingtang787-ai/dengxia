@@ -67,6 +67,7 @@ export async function createHarness(options?: {
   deps?: ParseDeps
   repair?: boolean
   office?: OfficeGateway
+  backupDir?: string
 }): Promise<Harness> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'desk-'))
   const db = AppDatabase.open(path.join(root, 'library.sqlite'))
@@ -82,6 +83,9 @@ export async function createHarness(options?: {
     },
     async pickExecutable() {
       return { cancelled: true, path: null }
+    },
+    async pickDirectory() {
+      return options?.backupDir ?? null
     },
   }
   const service = new DocumentService({

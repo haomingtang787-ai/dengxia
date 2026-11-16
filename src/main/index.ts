@@ -570,6 +570,15 @@ async function boot(): Promise<void> {
       if (result.canceled || !result.filePaths[0]) return { cancelled: true, path: null }
       return { cancelled: false, path: result.filePaths[0] }
     },
+    async pickDirectory(windowId, title) {
+      const parent = BrowserWindow.fromId(Number(windowId)) ?? undefined
+      const options = { title, properties: ['openDirectory', 'createDirectory'] as Array<'openDirectory' | 'createDirectory'> }
+      const result = parent
+        ? await dialog.showOpenDialog(parent, options)
+        : await dialog.showOpenDialog(options)
+      if (result.canceled || !result.filePaths[0]) return null
+      return result.filePaths[0]
+    },
   }
   const events: DeskEvents = {
     jobsChanged(event) {
@@ -593,6 +602,7 @@ async function boot(): Promise<void> {
     events,
     settings,
     recheckIsolation: () => verifyOfficeIsolation(settings),
+    version: () => app.getVersion(),
   })
   protocol.handle('app-resource', (request) => handleAppResource(store, root, request))
   const dev = Boolean(process.env.ELECTRON_RENDERER_URL)

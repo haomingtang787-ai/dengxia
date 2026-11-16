@@ -391,4 +391,12 @@ export function migrate(db: AppDatabase): void {
       db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 7, nowIso())
     })
   }
+  if (!hasVersion(db, 8)) {
+    db.transaction(() => {
+      // 记录每张卡最后一次被评的时间，复习页据此算「今天已复习多少张」。
+      db.exec('ALTER TABLE lecture_cards ADD COLUMN last_graded_at TEXT NULL')
+      db.exec('CREATE INDEX idx_lecture_cards_graded ON lecture_cards(last_graded_at)')
+      db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 8, nowIso())
+    })
+  }
 }

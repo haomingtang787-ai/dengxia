@@ -9,6 +9,7 @@ export const ERROR_CODES = [
   'PARSE_FAILED',
   'RESOURCE_LIMIT',
   'STORAGE_ERROR',
+  'NETWORK_ERROR',
   'CONFLICT',
   'AI_NOT_CONFIGURED',
   'AI_FAILED',
@@ -66,6 +67,8 @@ export type ImportResult = {
   documentId: string
   documentVersionId: string
   jobId: string
+  /** 同一个文件之前已经导入过：不会新建副本，直接指回已有文稿。 */
+  duplicate?: boolean
 }
 
 export type DocumentListItem = {
@@ -78,6 +81,8 @@ export type DocumentListItem = {
   createdAt: string
   sha256: string
   job: JobSnapshot | null
+  /** 是否在文稿库里置顶。 */
+  pinned: boolean
 }
 
 export type DocumentList = { items: DocumentListItem[]; total: number }
@@ -148,6 +153,50 @@ export type BlockList = { items: BlockView[]; total: number }
 
 export type OpenSourceResult = { opened: boolean }
 
+/** 复习每日目标（存 settings.json，不动数据库）。 */
+export type ReviewSettingsView = { cardsPerDay: number; missesPerDay: number; remind: boolean }
+
+/** 本机资料占用：库文件、原文、页面图分开算，设置里显示。 */
+export type StorageUsage = {
+  databaseBytes: number
+  originalsBytes: number
+  artifactsBytes: number
+  totalBytes: number
+  documents: number
+  pages: number
+  blocks: number
+}
+
+export type LibraryStats = {
+  documents: number
+  pages: number
+  blocks: number
+  lectures: number
+  cards: number
+  misses: number
+  sessions: number
+  checks: number
+  aiCalls: number
+  promptTokens: number
+  cachedTokens: number
+  completionTokens: number
+}
+
+export type BackupResult = {
+  path: string
+  bytes: number
+  files: number
+  documents: number
+  pages: number
+  cards: number
+  misses: number
+}
+
+/** 导出内容先回给渲染层，再由保存对话框写到磁盘，服务层不碰文件选择。 */
+export type ExportPayload = { fileName: string; content: string }
+
+export type SaveTextResult = { saved: boolean; path: string | null }
+
 export type JobChangedEvent = {
   jobId: string
   seq: number
@@ -205,6 +254,7 @@ export const RETRYABLE: Record<ErrorCode, boolean> = {
   PARSE_FAILED: true,
   RESOURCE_LIMIT: true,
   STORAGE_ERROR: true,
+  NETWORK_ERROR: true,
   CONFLICT: false,
   AI_NOT_CONFIGURED: false,
   AI_FAILED: true,

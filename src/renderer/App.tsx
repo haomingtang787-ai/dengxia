@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { BlockView, DocumentDetail, DocumentListItem, JobChangedEvent, JobSnapshot, Locator, PageView, Prerequisites, PreviewFocus } from '../shared/contract'
+import type { BlockView, DocumentDetail, DocumentListItem, JobChangedEvent, JobSnapshot, Locator, PageView, Prerequisites, PreviewFocus, ReviewSettingsView, StorageUsage, LibraryStats, BackupResult, ExportPayload } from '../shared/contract'
+import type { UpdateDownloadProgress } from '../shared/app'
 import { ReviewView } from './teaching/ReviewView'
 import { StudyView } from './study/StudyView'
 import type { AiConfigView } from '../shared/ai'
@@ -102,6 +103,21 @@ export function App() {
   // 删除文稿是破坏性操作：先点「×」展开确认条，再点「确认删除」才真的删。
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // 文稿整理：搜索、格式筛选、重命名与置顶。
+  const [search, setSearch] = useState('')
+  const [formatFilter, setFormatFilter] = useState('')
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameText, setRenameText] = useState('')
+  const listFilter = useRef({ query: '', format: '' })
+  // 设置里的复习目标与本机数据。
+  const [reviewForm, setReviewForm] = useState<ReviewSettingsView>({ cardsPerDay: 10, missesPerDay: 5, remind: true })
+  const [storage, setStorage] = useState<StorageUsage | null>(null)
+  const [stats, setStats] = useState<LibraryStats | null>(null)
+  const [backup, setBackup] = useState<BackupResult | null>(null)
+  const [dataBusy, setDataBusy] = useState(false)
+  const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null)
+  const [updateFile, setUpdateFile] = useState<string | null>(null)
+  const [updateDownloading, setUpdateDownloading] = useState(false)
   const [aiStatus, setAiStatus] = useState<AiConfigView | null>(null)
   const [aiForm, setAiForm] = useState<{ baseUrl: string; model: string; visionModel: string; apiKey: string }>({ baseUrl: DEFAULT_AI.baseUrl, model: DEFAULT_AI.model, visionModel: '', apiKey: '' })
   const [aiMessage, setAiMessage] = useState<Notice | null>(null)
@@ -122,7 +138,12 @@ export function App() {
 
   const refreshList = useCallback(async () => {
     if (!window.desk) return
-    const result = await window.desk.documents.list({ offset: 0, limit: 50 })
+    const result = await window.desk.documents.list({
+      offset: 0,
+      limit: 100,
+      query: listFilter.current.query || undefined,
+      format: listFilter.current.format || undefined,
+    })
     if (!result.ok) {
       setNotice({ tone: 'bad', text: result.error.message })
       return
@@ -210,6 +231,21 @@ export function App() {
     }
   }, [api, openVersion, refreshList])
 
+  // 输入停顿 250ms 再查库；格式切换立即刷新。
+  useEffect(() => {
+    if (!api || booting) return
+    const timer = window.setTimeout(() => void refreshList(), search ? 250 : 0)
+    return () => window.clearTimeout(timer)
+  }, [api, booting, search, formatFilter, refreshList])
+
+  useEffect(() => {
+    if (!api) return
+    const off = api.app.onUpdateProgress(setUpdateProgress)
+    return () => {
+      off()
+    }
+  }, [api])
+
   useEffect(() => {
     if (booting || view !== 'study' || selected || docs.length === 0) return
     const versionId = docs[0].documentVersionId
@@ -248,11 +284,43 @@ export function App() {
     for (const file of picked.data.files) {
       const result = await window.desk.documents.import({ handle: file.handle, requestId: crypto.randomUUID() })
       if (!result.ok) setNotice({ tone: 'bad', text: `${file.name}：${result.error.message}` })
-      else last = result.data.documentVersionId
+      else {
+        last = result.data.documentVersionId
+        if (result.data.duplicate) setNotice({ tone: 'info', text: `《${file.name}》之前导入过，已直接打开原稿，没有重复入库。` })
+      }
     }
     await refreshList()
     if (last) await openVersion(last)
     setBusy(false)
+  }
+
+  async function togglePin(item: DocumentListItem) {
+    if (!window.desk) return
+    const result = await window.desk.documents.pin({ documentVersionId: item.documentVersionId, pinned: !item.pinned })
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    await refreshList()
+    setNotice({ tone: 'info', text: result.data.pinned ? `《${item.displayName}》已置顶。` : `《${item.displayName}》已取消置顶。` })
+  }
+
+  function startRename(item: DocumentListItem) {
+    setRenamingId(item.documentVersionId)
+    setRenameText(item.displayName)
+  }
+
+  async function submitRename(item: DocumentListItem) {
+    if (!window.desk || !renameText.trim()) return
+    const result = await window.desk.documents.rename({ documentVersionId: item.documentVersionId, displayName: renameText.trim() })
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setRenamingId(null)
+    setDetail((current) => (current && current.documentVersionId === item.documentVersionId ? { ...current, displayName: result.data.displayName } : current))
+    await refreshList()
+    setNotice({ tone: 'info', text: `已改名为《${result.data.displayName}》。` })
   }
 
   async function deleteDocument(item: DocumentListItem) {
@@ -280,6 +348,7 @@ export function App() {
       setFocus(null)
       setAutoStatuses({})
     }
+    if (renamingId === item.documentVersionId) setRenamingId(null)
     setConfirmDeleteId(null)
     await refreshList()
     setNotice({ tone: 'info', text: `《${item.displayName}》已删除。` })
@@ -302,15 +371,101 @@ export function App() {
     }
     const info = await api.app.info()
     if (info.ok) setAppInfo(info.data)
+    const [review, usage, overview] = await Promise.all([api.review.settings(), api.data.storage(), api.data.stats()])
+    if (review.ok) setReviewForm(review.data)
+    if (usage.ok) setStorage(usage.data)
+    if (overview.ok) setStats(overview.data)
   }
 
   async function checkUpdate() {
     if (!api || updateBusy) return
     setUpdateBusy(true)
     setUpdateResult(null)
+    setUpdateFile(null)
+    setUpdateProgress(null)
     const result = await api.app.checkUpdate()
     if (result.ok) setUpdateResult(result.data)
     setUpdateBusy(false)
+  }
+
+  async function saveReviewGoal() {
+    if (!api) return
+    setDataBusy(true)
+    const result = await api.review.saveSettings(reviewForm)
+    setDataBusy(false)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setReviewForm(result.data)
+    setNotice({ tone: 'info', text: `复习目标已保存：每天 ${result.data.cardsPerDay} 张卡、${result.data.missesPerDay} 道错题。` })
+  }
+
+  async function backupLibrary() {
+    if (!api || dataBusy) return
+    setDataBusy(true)
+    const result = await api.data.backup()
+    setDataBusy(false)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setBackup(result.data)
+    setNotice({ tone: 'info', text: `已备份 ${result.data.files} 个文件（${formatBytes(result.data.bytes)}）到 ${result.data.path}` })
+  }
+
+  async function downloadUpdate() {
+    if (!api || !updateResult?.assetUrl || !updateResult.assetName || updateDownloading) return
+    setUpdateDownloading(true)
+    setUpdateProgress({ received: 0, total: updateResult.assetSize ?? 0, percent: 0 })
+    const result = await api.app.downloadUpdate({
+      assetUrl: updateResult.assetUrl,
+      assetName: updateResult.assetName,
+      assetSize: updateResult.assetSize,
+    })
+    setUpdateDownloading(false)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    setUpdateFile(result.data.filePath)
+    setNotice({ tone: 'info', text: `安装包已下载（${formatBytes(result.data.size)}），点「打开安装包」覆盖安装即可。` })
+  }
+
+  async function openDownloadedUpdate() {
+    if (!api || !updateFile) return
+    const result = await api.app.openUpdate({ filePath: updateFile })
+    if (!result.ok) setNotice({ tone: 'bad', text: result.error.message })
+  }
+
+  async function exportCards() {
+    if (!api) return
+    const result = await api.teaching.exportCards()
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    await saveExport(result.data)
+  }
+
+  async function exportMisses() {
+    if (!api) return
+    const result = await api.teaching.exportMisses()
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    await saveExport(result.data)
+  }
+
+  async function saveExport(payload: ExportPayload) {
+    if (!api) return
+    const result = await api.app.saveText(payload)
+    if (!result.ok) {
+      setNotice({ tone: 'bad', text: result.error.message })
+      return
+    }
+    if (result.data.saved) setNotice({ tone: 'info', text: `已导出：${result.data.path}` })
   }
 
   async function saveAi(test: boolean) {
@@ -529,24 +684,85 @@ export function App() {
                   <button className="icon-btn" title="收起文稿栏" onClick={() => setLibraryOpen(false)}>‹</button>
                 </div>
               </header>
+              <div className="doc-search">
+                <input
+                  value={search}
+                  onChange={(event) => {
+                    setSearch(event.target.value)
+                    listFilter.current.query = event.target.value.trim()
+                  }}
+                  placeholder="搜文稿名…"
+                  spellCheck={false}
+                  aria-label="搜索文稿"
+                />
+                <select
+                  value={formatFilter}
+                  onChange={(event) => {
+                    setFormatFilter(event.target.value)
+                    listFilter.current.format = event.target.value
+                  }}
+                  aria-label="按格式筛选"
+                >
+                  <option value="">全部格式</option>
+                  {Object.entries(FORMAT_LABEL).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <p className="doc-count">
+                {search || formatFilter ? `找到 ${total} 份` : `共 ${total} 份`}
+                {search || formatFilter ? <button className="link-btn" onClick={() => { setSearch(''); setFormatFilter(''); listFilter.current = { query: '', format: '' } }}>清除筛选</button> : null}
+              </p>
               <div className="doc-list">
                 {booting ? <p className="empty">正在读取本机文库…</p> : null}
-                {!booting && docs.length === 0 ? <p className="empty">还没有文稿。可以选择 PPTX、DOCX、PDF、TXT、Markdown 或图片。文件只留在这台电脑上。</p> : null}
+                {!booting && docs.length === 0 ? (
+                  <p className="empty">
+                    {search || formatFilter
+                      ? '没有匹配的文稿。换个关键词，或点「清除筛选」。'
+                      : '还没有文稿。可以选择 PPTX、DOCX、PDF、TXT、Markdown 或图片。文件只留在这台电脑上。'}
+                  </p>
+                ) : null}
                 {docs.map((item) => (
                   <div key={item.documentVersionId} className={`doc-item ${selected === item.documentVersionId ? 'active' : ''}`}>
                     <button className={`doc ${selected === item.documentVersionId ? 'active' : ''}`} onClick={() => void openVersion(item.documentVersionId)}>
-                      <b>{item.displayName}</b>
+                      <b>{item.pinned ? '★ ' : ''}{item.displayName}</b>
                       <small>{FORMAT_LABEL[item.format] ?? item.format} · {STATE_LABEL[item.job?.state ?? item.status] ?? item.status}</small>
                     </button>
-                    <button
-                      className={`doc-del ${confirmDeleteId === item.documentVersionId ? 'open' : ''}`}
-                      title="删除这份文稿"
-                      aria-label={`删除 ${item.displayName}`}
-                      onClick={() => setConfirmDeleteId((current) => (current === item.documentVersionId ? null : item.documentVersionId))}
-                      disabled={deleting}
-                    >
-                      ×
-                    </button>
+                    {renamingId === item.documentVersionId ? (
+                      <form
+                        className="doc-rename"
+                        onSubmit={(event) => {
+                          event.preventDefault()
+                          void submitRename(item)
+                        }}
+                      >
+                        <input
+                          value={renameText}
+                          onChange={(event) => setRenameText(event.target.value)}
+                          maxLength={120}
+                          autoFocus
+                          aria-label="新的文稿名"
+                        />
+                        <button className="primary" type="submit" disabled={!renameText.trim()}>保存</button>
+                        <button className="ghost" type="button" onClick={() => setRenamingId(null)}>取消</button>
+                      </form>
+                    ) : (
+                      <div className="doc-tools">
+                        <button className="doc-act" title={item.pinned ? '取消置顶' : '置顶'} onClick={() => void togglePin(item)} disabled={deleting}>
+                          {item.pinned ? '★' : '☆'}
+                        </button>
+                        <button className="doc-act" title="重命名" onClick={() => startRename(item)} disabled={deleting}>改</button>
+                        <button
+                          className={`doc-del ${confirmDeleteId === item.documentVersionId ? 'open' : ''}`}
+                          title="删除这份文稿"
+                          aria-label={`删除 ${item.displayName}`}
+                          onClick={() => setConfirmDeleteId((current) => (current === item.documentVersionId ? null : item.documentVersionId))}
+                          disabled={deleting}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    )}
                     {confirmDeleteId === item.documentVersionId ? (
                       <div className="doc-confirm">
                         <p>删除后，它的页面、讲解课、卡片和错题都会一起删掉，不能恢复。</p>
@@ -560,7 +776,7 @@ export function App() {
                     ) : null}
                   </div>
                 ))}
-                {total > docs.length ? <p className="empty">还有 {total - docs.length} 份未显示。当前列表读取前 50 份。</p> : null}
+                {total > docs.length ? <p className="empty">还有 {total - docs.length} 份未显示。搜索可以更快找到。</p> : null}
               </div>
             </>
           ) : (
@@ -572,7 +788,7 @@ export function App() {
         <section className="panel stage">
           <div className="body">
             {view === 'study' ? <StudyView notify={showNotice} documents={docs} selectedVersionId={selected} onOpenDocs={() => setView('doc')} /> : null}
-            {view === 'review' ? <ReviewView notify={showNotice} /> : null}
+            {view === 'review' ? <ReviewView notify={showNotice} onExportCards={() => void exportCards()} onExportMisses={() => void exportMisses()} /> : null}
             {view === 'doc' ? (
               <>
             {!detail ? <PrerequisitesCard prereq={prereq} busy={busy} onChoose={() => void chooseOffice()} onRecheck={() => void recheckOffice()} /> : null}
@@ -778,6 +994,60 @@ export function App() {
             </div>
             {aiMessage ? <p className={aiMessage.tone === 'bad' ? 'warning' : 'quiet'}>{aiMessage.text}</p> : null}
             <p className="quiet">模型只在这台机器上处理你点「模型拆讲」的那一页原文；不填密钥时「本地拆讲」照旧可用。</p>
+            <section className="settings-block">
+              <h3>复习目标</h3>
+              <div className="goal-form">
+                <label>
+                  每天卡片
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={reviewForm.cardsPerDay}
+                    onChange={(event) => setReviewForm((current) => ({ ...current, cardsPerDay: Number(event.target.value) }))}
+                  />
+                </label>
+                <label>
+                  每天错题
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={reviewForm.missesPerDay}
+                    onChange={(event) => setReviewForm((current) => ({ ...current, missesPerDay: Number(event.target.value) }))}
+                  />
+                </label>
+                <label className="goal-check">
+                  <input
+                    type="checkbox"
+                    checked={reviewForm.remind}
+                    onChange={(event) => setReviewForm((current) => ({ ...current, remind: event.target.checked }))}
+                  />
+                  到点没复习时提醒我
+                </label>
+                <button className="ghost" disabled={dataBusy} onClick={() => void saveReviewGoal()}>保存目标</button>
+              </div>
+            </section>
+            <section className="settings-block">
+              <h3>本机数据</h3>
+              {storage ? (
+                <p className="quiet">
+                  占用 {formatBytes(storage.totalBytes)}：库 {formatBytes(storage.databaseBytes)}、原文 {formatBytes(storage.originalsBytes)}、页面图 {formatBytes(storage.artifactsBytes)}
+                </p>
+              ) : null}
+              {stats ? (
+                <p className="quiet">
+                  {stats.documents} 份文稿 · {stats.pages} 页 · {stats.lectures} 节课 · {stats.cards} 张卡 · {stats.misses} 道错题 · AI 调用 {stats.aiCalls} 次、输入 {formatNumber(stats.promptTokens + stats.cachedTokens)} tokens
+                </p>
+              ) : null}
+              <div className="row">
+                <button className="ghost" disabled={dataBusy} onClick={() => void backupLibrary()}>
+                  {dataBusy ? '正在备份…' : '备份整库到文件夹'}
+                </button>
+                <span className="quiet">不含 API 密钥，也不含临时解析目录。</span>
+              </div>
+              {backup ? <p className="quiet">上次备份：{backup.path}（{backup.files} 个文件，{formatBytes(backup.bytes)}）</p> : null}
+            </section>
             <div className="app-update">
               <div className="row">
                 <span className="quiet">灯下 {appInfo?.version ?? '…'}</span>
@@ -791,6 +1061,17 @@ export function App() {
                   {updateResult.url ? <a href={updateResult.url} target="_blank" rel="noreferrer">前往下载</a> : null}
                 </p>
               ) : null}
+              {updateResult?.status === 'update-available' && updateResult.assetUrl ? (
+                <div className="row">
+                  <button className="primary" disabled={updateDownloading} onClick={() => void downloadUpdate()}>
+                    {updateDownloading ? `下载中 ${updateProgress?.percent ?? 0}%` : '下载安装包'}
+                  </button>
+                  {updateFile ? <button className="ghost" onClick={() => void openDownloadedUpdate()}>打开安装包</button> : null}
+                </div>
+              ) : null}
+              {updateProgress && updateDownloading ? (
+                <div className="progress"><span style={{ width: `${updateProgress.percent}%` }} /></div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -799,8 +1080,18 @@ export function App() {
   )
 }
 
-function anchorLabel(block: BlockView): string {
-  const locator = block.locator
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB'
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat('zh-CN').format(value)
+}
+
+function anchorLabel(block: BlockView): string {  const locator = block.locator
   if (locator.paragraphAnchor) return locator.paragraphAnchor
   if (locator.slideNumber) return `幻灯片 ${locator.slideNumber}`
   if (locator.pageNumber) return `第 ${locator.pageNumber} 页`

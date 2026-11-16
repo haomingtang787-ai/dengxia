@@ -405,6 +405,86 @@ export class Store {
     return Number(row?.total ?? 0)
   }
 
+  /** 按名称/格式查文稿（取全部再由上层排序分页，置顶才能跨页排在最前）。 */
+  queryDocuments(query: string, format: string | null): ListJoinRow[] {
+    const clauses: string[] = []
+    const params: string[] = []
+    if (query) {
+      clauses.push("d.display_name LIKE ? ESCAPE '\\'")
+      params.push(`%${query.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`)
+    }
+    if (format) {
+      clauses.push('v.format = ?')
+      params.push(format)
+    }
+    return this.db.all<ListJoinRow>(
+      `SELECT d.id AS document_id, d.display_name, d.created_at,
+              v.id AS document_version_id, v.format, v.size_bytes, v.status, v.sha256,
+              j.id AS job_id, j.state AS job_state, j.stage AS job_stage,
+              j.completed AS job_completed, j.total AS job_total,
+              j.error_code, j.error_message
+       FROM documents d
+       JOIN document_versions v ON v.id = (
+         SELECT id FROM document_versions WHERE document_id = d.id ORDER BY created_at DESC LIMIT 1
+       )
+       LEFT JOIN jobs j ON j.id = (
+         SELECT id FROM jobs WHERE document_version_id = v.id ORDER BY created_at DESC LIMIT 1
+       )
+       ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
+       ORDER BY d.created_at DESC, d.id DESC`,
+      ...params,
+    )
+  }
+
+  renameDocument(documentId: string, displayName: string): void {
+    this.db.run('UPDATE documents SET display_name = ? WHERE id = ?', displayName, documentId)
+  }
+
+  /** 同一个文件再次导入时，用它找到已有的那一条，避免库里堆重复副本。 */
+  latestVersionBySha(sha256: string): VersionRow | undefined {
+    return this.db.get<VersionRow>(
+      'SELECT * FROM document_versions WHERE sha256 = ? ORDER BY created_at DESC LIMIT 1',
+      sha256,
+    )
+  }
+
+  /** 设置/统计弹窗要的本机总量。 */
+  stats(): {
+    documents: number
+    pages: number
+    blocks: number
+    lectures: number
+    cards: number
+    misses: number
+    sessions: number
+    checks: number
+    aiCalls: number
+    promptTokens: number
+    cachedTokens: number
+    completionTokens: number
+  } {
+    const one = (sql: string): number => Number(this.db.get<{ total: number }>(sql)?.total ?? 0)
+    const usage = this.db.get<{ calls: number; prompt: number; cached: number; completion: number }>(
+      `SELECT COUNT(*) AS calls, COALESCE(SUM(prompt_tokens), 0) AS prompt,
+              COALESCE(SUM(cached_tokens), 0) AS cached, COALESCE(SUM(completion_tokens), 0) AS completion
+       FROM ai_usage`,
+    )
+    return {
+      documents: one('SELECT COUNT(*) AS total FROM documents'),
+      pages: one('SELECT COUNT(*) AS total FROM pages'),
+      blocks: one('SELECT COUNT(*) AS total FROM blocks'),
+      lectures: one('SELECT COUNT(*) AS total FROM lectures'),
+      cards: one('SELECT COUNT(*) AS total FROM lecture_cards'),
+      misses: one('SELECT COUNT(*) AS total FROM misses'),
+      sessions: one('SELECT COUNT(*) AS total FROM study_sessions'),
+      checks: one('SELECT COUNT(*) AS total FROM study_checks'),
+      aiCalls: Number(usage?.calls ?? 0),
+      promptTokens: Number(usage?.prompt ?? 0),
+      cachedTokens: Number(usage?.cached ?? 0),
+      completionTokens: Number(usage?.completion ?? 0),
+    }
+  }
+
   listDocuments(offset: number, limit: number): ListJoinRow[] {
     return this.db.all<ListJoinRow>(
       `SELECT d.id AS document_id, d.display_name, d.created_at,

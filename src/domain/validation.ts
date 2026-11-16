@@ -129,3 +129,32 @@ export function parseVersionBody(input: unknown): { documentVersionId: string; o
   const page = parsePagination(input)
   return { documentVersionId: String(input.documentVersionId).toLowerCase(), ...page }
 }
+
+export function parseRenameBody(input: unknown): { documentVersionId: string; displayName: string } {
+  if (!isPlainObject(input) || !isUuid(input.documentVersionId)) {
+    throw new ArgumentError('documentVersionId 无效')
+  }
+  if (typeof input.displayName !== 'string') throw new ArgumentError('文稿名必须是文字')
+  const displayName = input.displayName.trim().replace(/\s+/g, ' ')
+  if (!displayName) throw new ArgumentError('文稿名不能为空')
+  if (displayName.length > 120) throw new ArgumentError('文稿名最多 120 个字')
+  return { documentVersionId: String(input.documentVersionId).toLowerCase(), displayName }
+}
+
+export function parsePinBody(input: unknown): { documentVersionId: string; pinned: boolean } {
+  if (!isPlainObject(input) || !isUuid(input.documentVersionId)) {
+    throw new ArgumentError('documentVersionId 无效')
+  }
+  if (typeof input.pinned !== 'boolean') throw new ArgumentError('pinned 必须是布尔值')
+  return { documentVersionId: String(input.documentVersionId).toLowerCase(), pinned: input.pinned }
+}
+
+export function parseReviewSettings(input: unknown): { cardsPerDay: number; missesPerDay: number; remind: boolean } {
+  if (!isPlainObject(input)) throw new ArgumentError('复习设置必须是对象')
+  const cardsPerDay = optionalInteger(input.cardsPerDay, 10, '每日卡片')
+  const missesPerDay = optionalInteger(input.missesPerDay, 5, '每日错题')
+  if (cardsPerDay < 1 || cardsPerDay > 200) throw new ArgumentError('每日卡片要在 1 到 200 之间')
+  if (missesPerDay < 0 || missesPerDay > 100) throw new ArgumentError('每日错题要在 0 到 100 之间')
+  if (typeof input.remind !== 'boolean') throw new ArgumentError('remind 必须是布尔值')
+  return { cardsPerDay, missesPerDay, remind: input.remind }
+}

@@ -199,8 +199,34 @@ export class TeachingStore {
     return this.db.get<CardRow>('SELECT * FROM lecture_cards WHERE lecture_id = ? AND id = ?', lectureId, cardId)
   }
 
-  updateCard(lectureId: string, cardId: string, box: number, due: number): void {
-    this.db.run('UPDATE lecture_cards SET box = ?, due = ? WHERE lecture_id = ? AND id = ?', box, due, lectureId, cardId)
+  updateCard(lectureId: string, cardId: string, box: number, due: number, gradedAt: string): void {
+    this.db.run(
+      'UPDATE lecture_cards SET box = ?, due = ?, last_graded_at = ? WHERE lecture_id = ? AND id = ?',
+      box,
+      due,
+      gradedAt,
+      lectureId,
+      cardId,
+    )
+  }
+
+  /** 今天评过的卡片数，按本地零点到次日零点的 UTC 时间区间统计。 */
+  gradedBetween(startIso: string, endIso: string): number {
+    const row = this.db.get<{ total: number }>(
+      'SELECT COUNT(*) AS total FROM lecture_cards WHERE last_graded_at >= ? AND last_graded_at < ?',
+      startIso,
+      endIso,
+    )
+    return Number(row?.total ?? 0)
+  }
+
+  /** 全部卡片，按课程与序号排，导出 Anki 用。 */
+  allCards(): Array<CardRow & { lecture_title: string }> {
+    return this.db.all<CardRow & { lecture_title: string }>(
+      `SELECT c.*, l.title AS lecture_title
+       FROM lecture_cards c JOIN lectures l ON l.id = c.lecture_id
+       ORDER BY l.created_at ASC, c.ordinal ASC`,
+    )
   }
 
   dueCards(now: number): Array<CardRow & { lecture_title: string }> {

@@ -112,6 +112,12 @@ export type CreateLectureBody = {
   quizzes: Array<{ prompt: string; choices: string[]; answer: number; explain: string }>
 }
 
+export type ReviewSummary = {
+  due: number
+  reviewedToday: number
+  misses: number
+}
+
 export type GradeCardResult = { card: TeachingCard; box: number }
 
 export type QuizAnswerResult = { correct: boolean; explain: string; missAdded: boolean }

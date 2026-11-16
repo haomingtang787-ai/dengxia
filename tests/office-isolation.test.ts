@@ -53,7 +53,12 @@ describe('office isolation fail closed', () => {
           probe: { ok: true, executable: exe, version: 'LibreOffice 99', message: 'forged', probedAt: '2026-01-01T00:00:00.000Z' },
         }),
       )
-      expect(store.load()).toEqual({ libreOfficePath: exe, ai: null })
+      expect(store.load()).toMatchObject({
+        libreOfficePath: exe,
+        ai: null,
+        pinnedDocumentIds: [],
+        review: { cardsPerDay: 10, missesPerDay: 5, remind: true },
+      })
       store.save(store.load())
       const saved = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8')) as Record<string, unknown>
       expect(saved.allowUnsandboxedOfficeConversion).toBeUndefined()
