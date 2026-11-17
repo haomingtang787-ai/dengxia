@@ -371,6 +371,14 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     )))
     return
   }
+  if (action === 'review-open') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === '复习'); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    return
+  }
   if (action === 'workspace-quiz') {
     await new Promise((resolve) => setTimeout(resolve, 1200))
     await win.webContents.executeJavaScript(`(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`)

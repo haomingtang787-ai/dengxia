@@ -60,8 +60,33 @@
 
 .shell.teacher-only .stage .body {
   padding: 0;
-  overflow: hidden;
+  overflow: auto;
   display: block;
+}
+
+.shell.teacher-only .stage .body > .sheet.teaching {
+  width: min(1120px, 100%);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 32px 34px 56px;
+  border-radius: 0;
+  background: #fff;
+}
+
+.review-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.review-heading h2 {
+  margin: 0;
+}
+
+.review-back {
+  padding: 4px 9px;
+  font-size: 11px;
 }
 
 .ws-study {

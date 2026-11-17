@@ -864,8 +864,9 @@ export function App() {
     )
   }
 
+  const teacherShell = view === 'study' || view === 'review'
   return (
-    <div className={`app${view === 'study' ? ' teacher-app' : ''}`}>
+    <div className={`app${teacherShell ? ' teacher-app' : ''}`}>
       <div className="top-stack">
         <header className="top">
           <div className="brand">
@@ -931,7 +932,7 @@ export function App() {
         </div>
         {notice ? <div className={`banner ${notice.tone === 'bad' ? 'bad' : 'info'}`}>{notice.text}</div> : null}
       </div>
-      <div className={`shell ${view === 'doc' ? '' : 'two'}${libraryOpen ? '' : ' library-collapsed'}${view === 'study' ? ' teacher-only' : ''}`}>
+      <div className={`shell ${view === 'doc' ? '' : 'two'}${libraryOpen ? '' : ' library-collapsed'}${teacherShell ? ' teacher-only' : ''}`}>
         <aside className={`panel library${libraryOpen ? '' : ' collapsed'}`}>
           {libraryOpen ? (
             <>
@@ -1046,7 +1047,7 @@ export function App() {
         <section className="panel stage">
           <div className="body">
             {view === 'study' ? <StudyView notify={showNotice} documents={docs} selectedVersionId={selected} onImport={() => importFiles()} onOpenReview={() => setView('review')} onOpenSettings={() => void openAi()} /> : null}
-            {view === 'review' ? <ReviewView notify={showNotice} onExportCards={() => void exportCards()} onExportMisses={() => void exportMisses()} /> : null}
+            {view === 'review' ? <ReviewView notify={showNotice} onExportCards={() => void exportCards()} onExportMisses={() => void exportMisses()} onBack={() => setView('study')} /> : null}
             {view === 'doc' ? (
               <>
             {!detail ? <PrerequisitesCard prereq={prereq} busy={busy} onChoose={() => void chooseOffice()} onRecheck={() => void recheckOffice()} /> : null}

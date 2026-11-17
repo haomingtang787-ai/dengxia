@@ -19,10 +19,12 @@ export function ReviewView({
   notify,
   onExportCards,
   onExportMisses,
+  onBack,
 }: {
   notify: Notify
   onExportCards: () => void
   onExportMisses: () => void
+  onBack: () => void
 }) {
   const api = window.desk
   const [due, setDue] = useState<DueCardItem[]>([])
@@ -192,7 +194,10 @@ export function ReviewView({
     <article className="sheet teaching">
       <header>
         <div>
-          <h2>复习</h2>
+          <div className="review-heading">
+            <button className="ghost review-back" onClick={onBack}>← 回课堂</button>
+            <h2>复习</h2>
+          </div>
           <div className="meta">
             {today ? <span className="chip">今天 听懂 {today.known}</span> : null}
             {today ? <span className="chip">题 {today.quizzes}</span> : null}
