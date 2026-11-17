@@ -1,6 +1,6 @@
 {
   "name": "desk-teacher-agent",
-  "version": "0.7.5",
+  "version": "1.0.1",
   "private": true,
   "description": "灯下：本地单用户教师文稿工作台，导入、解析、预览、AI 私教与复习",
   "main": "out/main/index.js",

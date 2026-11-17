@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DocumentListItem, PageView } from '../../shared/contract'
 import type { ReviewSummary } from '../../shared/teaching'
+import type { TeacherMemory } from '../../shared/teacher'
 import type {
   StudyCheck,
   StudyCourseSession,
@@ -152,9 +153,9 @@ export function StudyView({
   const [moreOpen, setMoreOpen] = useState(false)
   const [teacherOpen, setTeacherOpen] = useState(false)
   const [teacherName, setTeacherName] = useState('老师')
+  const [teacherMemories, setTeacherMemories] = useState<TeacherMemory[]>([])
   const [confirmAction, setConfirmAction] = useState<'chat' | 'summary' | 'delete' | null>(null)
   const [pages, setPages] = useState<PageView[]>([])
-  const [pagesReady, setPagesReady] = useState(false)
   const [slidePeek, setSlidePeek] = useState<{ citation: StudySlideCitation; page: PageView | null } | null>(null)
   const [courseDialog, setCourseDialog] = useState<{ mode: 'create' | 'rename'; courseId?: string; name: string } | null>(null)
   const [courseDialogBusy, setCourseDialogBusy] = useState(false)
@@ -210,6 +211,7 @@ export function StudyView({
     void api?.teacher.overview().then((result) => {
       if (!alive || !result.ok) return
       setTeacherName(result.data.persona.name)
+      setTeacherMemories(result.data.memories.filter((memory) => memory.userConfirmed && memory.status === 'active'))
     })
     return () => {
       alive = false
@@ -274,7 +276,6 @@ export function StudyView({
   useEffect(() => {
     let alive = true
     setPages([])
-    setPagesReady(false)
     if (!detail) return
     void (async () => {
       if (!api) return
@@ -290,7 +291,6 @@ export function StudyView({
       }
       if (!alive) return
       setPages(collected)
-      setPagesReady(true)
     })()
     return () => {
       alive = false
@@ -321,9 +321,12 @@ export function StudyView({
       .filter((course) => course.name.toLowerCase().includes(query) || course.sessions.length > 0)
   }, [courseItems, railQuery])
   const totalMinutes = detail?.units.reduce((sum, unit) => sum + unit.minutes, 0) ?? 0
-  const latestAssistantId = useMemo(() => {
+  const lastCitationPage = useMemo(() => {
     if (!detail) return null
-    return [...detail.messages].reverse().find((message) => message.role === 'assistant' && message.citations.length > 0)?.id ?? null
+    for (const message of [...detail.messages].reverse()) {
+      if (message.role === 'assistant' && message.citations.length > 0) return message.citations[0].pageNumber
+    }
+    return null
   }, [detail])
 
   useEffect(() => {
@@ -370,6 +373,15 @@ export function StudyView({
     setActiveCourseId(session.courseId ?? null)
     setRightOpen(false)
     window.setTimeout(() => scrollToUnit(unit.ordinal), 140)
+  }
+
+  function continueCurrentUnit() {
+    if (!activeUnit) return
+    setRightOpen(false)
+    window.setTimeout(() => {
+      scrollToUnit(activeUnit.ordinal)
+      questionRef.current?.focus()
+    }, 80)
   }
 
   function toggleCourse(courseId: string) {
@@ -597,9 +609,9 @@ export function StudyView({
     void createSession()
   }, [loading, detail, busy, selectedDoc, sessions, activeCourseId])
 
-  async function sendQuestion() {
+  async function sendQuestion(textOverride?: string) {
     if (!api || !detail || busy) return
-    const content = question.trim()
+    const content = (textOverride ?? question).trim()
     if (!content) {
       setError('先写一句想问老师的话。')
       return
@@ -625,6 +637,12 @@ export function StudyView({
     setBusy(null)
     const changed = result.data.artifacts.find((item) => before.get(item.id) !== item.updatedAt)
     if (changed) notify('info', '老师把生成物放到右栏「生成物」里了。')
+  }
+
+  function quickAsk(content: string) {
+    if (busy) return
+    setQuestion(content)
+    void sendQuestion(content)
   }
 
   async function runTool(
@@ -881,6 +899,7 @@ export function StudyView({
       railBusy={railBusy}
       railNote={railNote}
       reviewStats={reviewStats}
+      memories={teacherMemories}
       onClose={() => setRightOpen(false)}
       onOpenMaterials={(focus) => { setToolFocus(focus); setMaterialsOpen(true) }}
       onReview={() => void generateReview()}
@@ -888,6 +907,8 @@ export function StudyView({
       onQuiz={() => void runTool('quiz')}
       onOpenReview={onOpenReview}
       onPersonalize={personalizeTutoring}
+      onOpenTeacher={() => setTeacherOpen(true)}
+      onContinue={continueCurrentUnit}
     />
   ) : null
 
@@ -1006,6 +1027,8 @@ export function StudyView({
               </h2>
               <p className="ws-head-meta">
                 {detail.units.length} 讲 · 约 {totalMinutes} 分钟 · {pages.length ? `讲义 ${pages.length} 页 · ` : ''}上次更新 {timeLabel(detail.updatedAt)}
+                {lastCitationPage ? ` · 上次停在 p.${lastCitationPage}` : ''}
+                {reviewStats?.due ? ` · 今天复习 ${reviewStats.due} 张` : ''}
               </p>
             </div>
             <div className="ws-head-actions">
@@ -1058,7 +1081,6 @@ export function StudyView({
                 teacherName={teacherName}
                 latest={false}
                 pages={pages}
-                pagesReady={pagesReady}
                 onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
               />
             ))}
@@ -1077,17 +1099,19 @@ export function StudyView({
                     active={activeUnit?.id === unit.id}
                     onSave={saveCheck}
                   />
-                  {unitMessages.map((message) => (
-                    <ChatMessage
-                      key={message.id}
-                      message={message}
-                      teacherName={teacherName}
-                      latest={message.id === latestAssistantId}
-                      pages={pages}
-                      pagesReady={pagesReady}
-                      onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
-                    />
-                  ))}
+                  {(() => {
+                    const lastAssistantIndex = unitMessages.map((message) => message.role).lastIndexOf('assistant')
+                    return unitMessages.map((message, index) => (
+                      <ChatMessage
+                        key={message.id}
+                        message={message}
+                        teacherName={teacherName}
+                        latest={index === lastAssistantIndex}
+                        pages={pages}
+                        onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
+                      />
+                    ))
+                  })()}
                   {busy === 'send' && activeUnit?.id === unit.id ? (
                     <div className="ws-message assistant pending">
                       <span className="ws-avatar">师</span>
@@ -1102,9 +1126,8 @@ export function StudyView({
                 key={message.id}
                 message={message}
                 teacherName={teacherName}
-                latest={message.id === latestAssistantId}
+                latest={false}
                 pages={pages}
-                pagesReady={pagesReady}
                 onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
               />
             ))}
@@ -1112,6 +1135,12 @@ export function StudyView({
 
           <div className="ws-composer">
             <div className="ws-composer-box">
+              <div className="ws-composer-quick">
+                <span>听不下去就换讲法</span>
+                <button onClick={() => quickAsk('这一段再讲通俗一点，多用一个生活里的例子。')}>再通俗一点</button>
+                <button onClick={() => quickAsk('这里再举一个具体例子，最好接着这一讲的讲义页说。')}>举个例子</button>
+                <button onClick={() => quickAsk('别继续讲了，直接考我这一讲的两个核心问题。')}>直接考我</button>
+              </div>
               <div className="ws-composer-input">
                 <button className="ws-plus" title="打开整份课件与资料" onClick={() => setMaterialsOpen(true)}>＋</button>
                 <textarea
@@ -1229,14 +1258,12 @@ function ChatMessage({
   teacherName,
   latest,
   pages,
-  pagesReady,
   onOpenPage,
 }: {
   message: StudyMessage
   teacherName: string
   latest: boolean
   pages: PageView[]
-  pagesReady: boolean
   onOpenPage: (citation: StudySlideCitation, page: PageView | null) => void
 }) {
   if (message.role === 'user') {
@@ -1255,8 +1282,8 @@ function ChatMessage({
     )
   }
   const citations = message.citations
-  const cards = latest && pagesReady ? citations.slice(0, 2) : []
-  const chips = latest && pagesReady ? citations.slice(2) : citations
+  const cards = latest ? citations.slice(0, 2) : []
+  const chips = latest ? citations.slice(2) : citations
   return (
     <div className="ws-message assistant">
       <span className="ws-avatar">师</span>
@@ -1476,6 +1503,7 @@ function ContextRail({
   railBusy,
   railNote,
   reviewStats,
+  memories,
   onClose,
   onOpenMaterials,
   onReview,
@@ -1483,6 +1511,8 @@ function ContextRail({
   onQuiz,
   onOpenReview,
   onPersonalize,
+  onOpenTeacher,
+  onContinue,
 }: {
   detail: StudySessionDetail
   unit: StudyUnit | null
@@ -1491,6 +1521,7 @@ function ContextRail({
   railBusy: 'review' | 'cards' | null
   railNote: string
   reviewStats: ReviewSummary | null
+  memories: TeacherMemory[]
   onClose: () => void
   onOpenMaterials: (focus: StudyToolKind | null) => void
   onReview: () => void
@@ -1498,6 +1529,8 @@ function ContextRail({
   onQuiz: () => void
   onOpenReview: () => void
   onPersonalize: () => void
+  onOpenTeacher: () => void
+  onContinue: () => void
 }) {
   const artifacts = detail.artifacts
     .filter((artifact) => unit && (artifact.scope === `unit:${unit.ordinal}` || artifact.scope === 'course'))
@@ -1514,6 +1547,25 @@ function ContextRail({
     ? (pageNumbers.length === 1 ? `p.${pageNumbers[0]}` : `p.${Math.min(...pageNumbers)}–p.${Math.max(...pageNumbers)}`)
     : fallbackPage ? `p.${fallbackPage}` : ''
   const shortTitle = unit?.title.split(/[：:]/)[0] || detail.title
+  const dueCount = reviewStats?.due ?? 0
+  const missCount = reviewStats?.misses ?? 0
+  const topMemories = memories.slice(0, 2)
+  const planRows: Array<{ key: string; label: string; meta: string; action: () => void; primary?: boolean }> = []
+  if (dueCount > 0) {
+    planRows.push({ key: 'due', label: `复习 ${dueCount} 张到点卡片`, meta: '今天先回忆，再看答案', action: onOpenReview, primary: true })
+  }
+  if (missCount > 0) {
+    planRows.push({ key: 'miss', label: `重做 ${missCount} 道错题`, meta: '错过一次的，更要回炉', action: onOpenReview })
+  }
+  if (unit) {
+    planRows.push({
+      key: 'continue',
+      label: `继续第 ${unit.ordinal + 1} 讲 · ${shortTitle}`,
+      meta: '从上次停下的地方接着讲',
+      action: onContinue,
+      primary: planRows.length === 0,
+    })
+  }
   return (
     <aside className={`ws-context${open ? ' open' : ''}`}>
       <header className="ws-context-head">
@@ -1531,40 +1583,79 @@ function ContextRail({
         </p>
       </header>
 
-      <section className="ws-actions-card">
-        <div className="ws-card-head">
-          <h4>学习动作</h4>
-          <span>一键就做</span>
+      <section className="ws-today-card">
+        <div className="ws-today-head">
+          <h4>今天</h4>
+          <span>{planRows.length ? `${planRows.length} 个动作` : '先开讲'}</span>
         </div>
-        <div className="ws-action-grid">
-          <button disabled={busy || railBusy !== null} onClick={onReview}>
-            <span>▤</span>
-            <b>{railBusy === 'review' ? '正在生成…' : '复习资料'}</b>
-            <small>总结 + 大纲</small>
-          </button>
-          <button disabled={busy || railBusy !== null} onClick={onCards}>
-            <span>▦</span>
-            <b>{railBusy === 'cards' ? '正在生成…' : '一键卡片'}</b>
-            <small>从这一讲的知识点</small>
-          </button>
-          <button disabled={busy || railBusy !== null} onClick={onQuiz}>
-            <span>◫</span>
-            <b>题测</b>
-            <small>{questionCount ? `${questionCount} 道题` : '先答后判'}</small>
-          </button>
-          <button disabled={busy || railBusy !== null} onClick={onOpenReview}>
-            <span>↺</span>
-            <b>错题本</b>
-            <small>{reviewStats ? `${reviewStats.misses} 道错题` : '到点再练'}</small>
-          </button>
-          <button className="wide" disabled={busy || railBusy !== null} onClick={onPersonalize}>
-            <span>◎</span>
-            <b>个性化辅导</b>
-            <small>按你的学习习惯，先找最该补的一块</small>
-          </button>
-        </div>
-        {railNote ? <p className="ws-rail-note">{railNote}</p> : null}
+        {planRows.length ? (
+          <div className="ws-today-list">
+            {planRows.map((row) => (
+              <button key={row.key} className={`ws-today-row${row.primary ? ' primary' : ''}`} onClick={row.action}>
+                <span className="ws-today-dot" />
+                <span className="ws-today-text">
+                  <b>{row.label}</b>
+                  <small>{row.meta}</small>
+                </span>
+                <span className="ws-today-go">开始</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="quiet">先学完这一讲，复习会自动排。</p>
+        )}
       </section>
+
+      {topMemories.length ? (
+        <div className="ws-memory-strip">
+          <span>她记得你</span>
+          <p>{topMemories.map((memory) => memory.statement).join('；')}</p>
+          <button onClick={onOpenTeacher}>管理</button>
+        </div>
+      ) : null}
+
+      <details className="ws-actions-more">
+        <summary>
+          <span>更多学习动作</span>
+          <small>总结 · 卡片 · 题测 · 错题 · 个性化</small>
+          <i>⌄</i>
+        </summary>
+        <section className="ws-actions-card">
+          <div className="ws-card-head">
+            <h4>学习动作</h4>
+            <span>一键就做</span>
+          </div>
+          <div className="ws-action-grid">
+            <button disabled={busy || railBusy !== null} onClick={onReview}>
+              <span>▤</span>
+              <b>{railBusy === 'review' ? '正在生成…' : '复习资料'}</b>
+              <small>总结 + 大纲</small>
+            </button>
+            <button disabled={busy || railBusy !== null} onClick={onCards}>
+              <span>▦</span>
+              <b>{railBusy === 'cards' ? '正在生成…' : '一键卡片'}</b>
+              <small>从这一讲的知识点</small>
+            </button>
+            <button disabled={busy || railBusy !== null} onClick={onQuiz}>
+              <span>◫</span>
+              <b>题测</b>
+              <small>{questionCount ? `${questionCount} 道题` : '先答后判'}</small>
+            </button>
+            <button disabled={busy || railBusy !== null} onClick={onOpenReview}>
+              <span>↺</span>
+              <b>错题本</b>
+              <small>{reviewStats ? `${reviewStats.misses} 道错题` : '到点再练'}</small>
+            </button>
+            <button className="wide" disabled={busy || railBusy !== null} onClick={onPersonalize}>
+              <span>◎</span>
+              <b>个性化辅导</b>
+              <small>按你的学习习惯，先找最该补的一块</small>
+            </button>
+          </div>
+        </section>
+      </details>
+
+      {railNote ? <p className="ws-rail-note ws-rail-note-outside">{railNote}</p> : null}
 
       <div className="ws-context-scroll">
         <section className="ws-context-section ws-context-card">

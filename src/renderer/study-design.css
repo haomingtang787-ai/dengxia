@@ -1215,9 +1215,40 @@
 }
 
 .ws-study .ws-cite-chips button:hover {
-  border-color: #cbd8ff;
-  background: #eef3ff;
-  color: #3757d6;
+  border-color: #cbdccf;
+  background: #f1f7f2;
+  color: #20483d;
+}
+
+.ws-study .ws-composer-quick {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 2px 7px;
+}
+
+.ws-study .ws-composer-quick > span {
+  color: #98a49b;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.ws-study .ws-composer-quick button {
+  padding: 2px 7px;
+  border: 1px solid #e2e8e1;
+  border-radius: 999px;
+  background: #fbfdfb;
+  color: #617367;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.ws-study .ws-composer-quick button:hover {
+  border-color: #c2d5c6;
+  background: #f4f9f4;
+  color: #20483d;
 }
 
 .ws-study .ws-message.pending .ws-bubble {
@@ -1678,6 +1709,216 @@
   text-overflow: ellipsis;
 }
 
+.ws-today-card {
+  flex: none;
+  margin: 10px 15px 0;
+  padding: 11px 12px 10px;
+  border: 1px solid #dce8df;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #fbfdf9 0%, #ffffff 70%);
+  box-shadow: 0 2px 7px rgba(45, 63, 48, 0.03);
+}
+
+.ws-today-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.ws-study .ws-today-head h4 {
+  margin: 0;
+  color: #23483c;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.ws-today-head > span {
+  color: #98a29a;
+  font-size: 9px;
+}
+
+.ws-today-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.ws-today-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid #edf1ec;
+  border-radius: 7px;
+  background: #fbfdfb;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ws-today-row:hover {
+  border-color: #cbdccf;
+  background: #f5faf6;
+}
+
+.ws-today-row.primary {
+  border-color: #cfdfd2;
+  background: #f1f8f1;
+}
+
+.ws-today-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #7da98d;
+}
+
+.ws-today-row.primary .ws-today-dot {
+  background: #20483d;
+}
+
+.ws-today-text {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.ws-today-text b {
+  overflow: hidden;
+  color: #27493d;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-today-text small {
+  overflow: hidden;
+  color: #8a968e;
+  font-size: 9px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-today-go {
+  flex: none;
+  margin-left: auto;
+  color: #7c9986;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.ws-today-row.primary .ws-today-go {
+  color: #20483d;
+  font-weight: 600;
+}
+
+.ws-memory-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 15px 0;
+  padding: 6px 10px;
+  border: 1px dashed #dbe5dc;
+  border-radius: 7px;
+  background: #fbfdf9;
+}
+
+.ws-memory-strip > span {
+  flex: none;
+  color: #6e9179;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.ws-memory-strip p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #64756a;
+  font-size: 9.5px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-memory-strip button {
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #20483d;
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.ws-actions-more {
+  flex: none;
+  margin: 8px 15px 0;
+}
+
+.ws-actions-more > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 9px;
+  border: 1px dashed #dfe7dd;
+  border-radius: 7px;
+  background: #fbfdf9;
+  color: #66776c;
+  font-size: 9.5px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.ws-actions-more > summary::marker,
+.ws-actions-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ws-actions-more > summary span {
+  color: #4f6558;
+  font-weight: 600;
+}
+
+.ws-actions-more > summary small {
+  overflow: hidden;
+  color: #9aa49c;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-actions-more > summary i {
+  margin-left: auto;
+  color: #8a968e;
+  font-style: normal;
+  transition: transform 0.15s ease;
+}
+
+.ws-actions-more[open] > summary i {
+  transform: rotate(180deg);
+}
+
+.ws-actions-more .ws-actions-card {
+  margin: 3px 0 0;
+}
+
+.ws-rail-note-outside {
+  margin: 6px 15px 0;
+}
+
 .ws-actions-card {
   flex: none;
   margin: 10px 15px 0;
@@ -1764,6 +2005,10 @@
   color: #6d7d72;
   font-size: 9px;
   line-height: 1.45;
+}
+
+.ws-rail-note-outside {
+  margin: 7px 15px 0;
 }
 
 .ws-context-scroll {
