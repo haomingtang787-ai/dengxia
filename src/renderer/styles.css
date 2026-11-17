@@ -431,7 +431,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .tab { background: #fff; border: 1px solid #e6e8ee; border-radius: 999px; padding: 6px 14px; }
 .tab.active { background: #f4f6ff; border-color: #d9e0fb; font-weight: 650; }
 .shell.two { grid-template-columns: 300px minmax(0, 1fr); }
-/* 老师工作台自己就是三栏：课程 / 对话 / 这一讲；外层文稿库收进「文稿库」入口，不占第四栏。 */
+/* 老师页独立三栏：课程 / 对话 / 这一讲；旧文稿库只在文稿、复习路由保留。 */
 .shell.teacher-only { grid-template-columns: minmax(0, 1fr); }
 .shell.teacher-only .panel.library { display: none; }
 
@@ -549,18 +549,6 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-outline-hint { margin: -2px 0 2px; font-size: 11px; color: #7a8983; line-height: 1.4; }
 .pulse-dot { width: 9px; height: 9px; border-radius: 50%; background: #1f9d80; box-shadow: 0 0 0 5px rgba(31, 157, 128, 0.14); animation: pulse 1.4s infinite; flex: 0 0 auto; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 3px rgba(31,157,128,.16); } 70% { box-shadow: 0 0 0 10px rgba(31,157,128,0); } 100% { box-shadow: 0 0 0 3px rgba(31,157,128,0); } }
-.study-intro { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
-.study-intro-main { border: 1px solid #e3e9e6; border-radius: 16px; padding: 22px; background: linear-gradient(180deg, #ffffff, #fbfdfc); }
-.study-intro-main h3 { margin: 0 0 8px; font-size: 22px; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; }
-.study-intro-main > p { margin: 0 0 16px; color: #52645e; }
-.study-steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.study-steps > div { border: 1px solid #e6ece9; border-radius: 14px; padding: 14px; background: #fff; display: flex; flex-direction: column; gap: 3px; }
-.study-steps b { color: #1f7f6a; font-family: "Iowan Old Style", Palatino, "Songti SC", serif; font-size: 22px; line-height: 1; }
-.study-steps span { font-weight: 650; }
-.study-steps small { color: #5c6b7f; font-size: 12px; line-height: 1.5; }
-.study-habits { border: 1px solid #e6e8ee; border-radius: 16px; padding: 16px; background: #fff; display: flex; flex-direction: column; gap: 10px; }
-.study-habits h3 { margin: 0; font-size: 16px; }
-.study-habits .quiet { margin: 0; }
 .study-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #5c6b7f; }
 .study-field input, .study-field select { border: 1px solid #dfe5e2; border-radius: 9px; padding: 7px 9px; background: #fff; color: #243247; }
 .study-room { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; align-items: start; min-height: 0; }
@@ -759,7 +747,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   .study.has-course .study-room.outline-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
-  .study-intro, .study-room { grid-template-columns: 1fr; }
+  .study-room { grid-template-columns: 1fr; }
   .study-steps { grid-template-columns: 1fr; }
   .study-path-head { flex-direction: column; gap: 7px; }
   .study-path-meta { justify-content: flex-start; }
@@ -1313,8 +1301,6 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 
 .ws-intro-center { overflow: hidden; }
 .ws-intro-scroll { flex: 1; min-height: 0; overflow: auto; padding: 14px 18px 24px; }
-.ws-intro-center .study-intro { grid-template-columns: minmax(0, 1fr); }
-.ws-intro-center .study-habits { max-width: 620px; }
 
 .ws-peek { width: min(980px, 94vw); max-height: 92vh; display: flex; flex-direction: column; }
 .ws-peek header p { margin: 5px 0 0; }
