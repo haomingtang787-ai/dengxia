@@ -20,6 +20,7 @@ import type {
   StudyUsageAudit,
 } from '../../shared/study'
 import { MathText } from '../components/MathText'
+import { DEFAULT_AI } from '../../shared/ai'
 import { TeacherProfile } from './TeacherProfile'
 import { StudyTools } from './StudyTools'
 import {
@@ -109,14 +110,14 @@ export function StudyView({
   notify,
   documents,
   selectedVersionId,
-  onOpenDocs,
+  onImport,
   onOpenReview,
   onOpenSettings,
 }: {
   notify: Notify
   documents: DocumentListItem[]
   selectedVersionId: string | null
-  onOpenDocs: () => void
+  onImport: () => Promise<string | null>
   onOpenReview: () => void
   onOpenSettings: () => void
 }) {
@@ -131,7 +132,10 @@ export function StudyView({
   const [question, setQuestion] = useState('')
   const [mode, setMode] = useState<StudyMode>('direct')
   const [skill, setSkill] = useState<StudySkill>('auto')
-  const [modelName, setModelName] = useState('模型')
+  const [modelName, setModelName] = useState<string>(DEFAULT_AI.model)
+  const [modelChoices, setModelChoices] = useState<string[]>([])
+  const [modelBusy, setModelBusy] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [busy, setBusy] = useState<Busy>(null)
   const [progress, setProgress] = useState<StudyProgress | null>(null)
   const [error, setError] = useState('')
@@ -151,6 +155,8 @@ export function StudyView({
   const [courseDialog, setCourseDialog] = useState<{ mode: 'create' | 'rename'; courseId?: string; name: string } | null>(null)
   const [courseDialogBusy, setCourseDialogBusy] = useState(false)
   const autoStarted = useRef('')
+  const importedVersion = useRef<string | null>(null)
+  const importPending = useRef(false)
   const stickBottom = useRef(false)
   const streamRef = useRef<HTMLDivElement | null>(null)
   const questionRef = useRef<HTMLTextAreaElement | null>(null)
@@ -225,7 +231,17 @@ export function StudyView({
         const preferred = selectedVersionId
           ? listResult.data.items.find((item) => item.documentVersionId === selectedVersionId)
           : listResult.data.items[0]
-        if (preferred) await open(preferred.sessionId)
+        if (preferred) {
+          importedVersion.current = null
+          importPending.current = false
+          await open(preferred.sessionId)
+        } else if (selectedVersionId && (importPending.current || selectedVersionId === importedVersion.current)) {
+          // 刚导入、还没拆课的文稿：先把旧课堂退场，让下面的自动拆课接住它。
+          importedVersion.current = null
+          importPending.current = false
+          setDetail(null)
+          setUnitId(null)
+        }
       }
       setLoading(false)
     })()
@@ -300,6 +316,21 @@ export function StudyView({
     setToolFocus(null)
     setRightOpen(false)
   }, [detail?.sessionId])
+
+  useEffect(() => {
+    let alive = true
+    void api?.ai.models().then((result) => {
+      if (alive && result.ok) setModelChoices(result.data.models)
+    })
+    return () => {
+      alive = false
+    }
+  }, [api])
+
+  const modelOptions = useMemo(() => {
+    const extras = modelChoices.length ? modelChoices : ['deepseek-chat', 'deepseek-reasoner']
+    return Array.from(new Set([modelName, ...extras].filter((item) => item && item !== '模型')))
+  }, [modelChoices, modelName])
 
   useEffect(() => {
     if (!stickBottom.current) return
@@ -386,6 +417,43 @@ export function StudyView({
     }
     setCourseDialog(null)
     notify('info', courseDialog.mode === 'create' ? '课程已建好。' : '课程名已改。')
+  }
+
+  async function runImport() {
+    if (importing) return
+    setImporting(true)
+    importPending.current = true
+    try {
+      const imported = await onImport()
+      if (imported) importedVersion.current = imported
+      else importPending.current = false
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  async function changeModel(next: string) {
+    if (!api || !next || next === modelName || modelBusy) return
+    setModelBusy(true)
+    const status = await api.ai.status()
+    if (!status.ok) {
+      setModelBusy(false)
+      notify('bad', status.error.message)
+      return
+    }
+    const saved = await api.ai.saveConfig({
+      baseUrl: status.data.baseUrl,
+      model: next,
+      visionModel: status.data.visionModel,
+      apiKey: '',
+    })
+    setModelBusy(false)
+    if (!saved.ok) {
+      notify('bad', saved.error.message)
+      return
+    }
+    setModelName(saved.data.model)
+    notify('info', `模型已切换到 ${saved.data.model}，下一句起生效。`)
   }
 
   async function createSession() {
@@ -588,9 +656,14 @@ export function StudyView({
           </div>
 
           <div className="ws-rail-actions">
-            <button className="ws-new-course" title="新建课程" onClick={() => setCourseDialog({ mode: 'create', name: '' })}>
-              <span>＋</span> 新建课程
-            </button>
+            <div className="ws-rail-buttons">
+              <button className="ws-new-course" title="新建课程" onClick={() => setCourseDialog({ mode: 'create', name: '' })}>
+                <span>＋</span> 新建课程
+              </button>
+              <button className="ws-import-course" title="导入课件" onClick={() => void runImport()} disabled={importing}>
+                <span>{importing ? '…' : '⇧'}</span> {importing ? '导入中' : '导入课件'}
+              </button>
+            </div>
             <label className="ws-search">
               <span>⌕</span>
               <input
@@ -629,7 +702,9 @@ export function StudyView({
                       {course.sessions.length === 0 ? (
                         <div className="ws-course-empty">
                           <p>还没有课件。</p>
-                          <button className="ghost" onClick={onOpenDocs}>导入课件</button>
+                          <button className="ghost" onClick={() => void runImport()} disabled={importing}>
+                            {importing ? '正在导入…' : '导入课件'}
+                          </button>
                         </div>
                       ) : course.sessions.map((session) => {
                         const isActive = detail?.sessionId === session.sessionId
@@ -671,7 +746,7 @@ export function StudyView({
             })}
             {courseItems.length === 0 ? (
               <div className="ws-course-empty first">
-                <p>还没有课程。先建一门课，再从文稿库导入课件。</p>
+                <p>还没有课程。先建一门课，再用「导入课件」把课件放进来。</p>
                 <button className="primary" onClick={() => setCourseDialog({ mode: 'create', name: '' })}>新建课程</button>
               </div>
             ) : courseItems.length > 0 && visibleCourses.length === 0 ? (
@@ -680,11 +755,6 @@ export function StudyView({
           </div>
 
           <footer className="ws-left-foot">
-            <button onClick={onOpenDocs}>
-              <span>▤</span>
-              <b>文稿库</b>
-              <small>{documents.length} 份</small>
-            </button>
             <button onClick={onOpenReview}>
               <span>◫</span>
               <b>复习</b>
@@ -727,12 +797,14 @@ export function StudyView({
               <p className="quiet">
                 {selectedDoc
                   ? `当前选中：${selectedDoc.displayName}。左边选课程，或直接开课。`
-                  : '还没有文稿。先去「文稿」上传课件。'}
+                  : '把课件导入进来，先建课程，再让老师把它拆成几讲。'}
               </p>
             </div>
             <div className="ws-head-actions">
               <button className="ghost" onClick={() => setTeacherOpen(true)}>老师档案</button>
-              <button className="ghost" onClick={onOpenDocs}>文稿库</button>
+              <button className="ghost" onClick={() => void runImport()} disabled={importing}>
+                {importing ? '正在导入…' : '导入课件'}
+              </button>
               <button className="primary" onClick={() => void createSession()} disabled={busy !== null || !selectedDoc}>
                 {busy === 'create' ? '正在完整读懂并拆课…' : '完整读懂并拆课'}
               </button>
@@ -827,7 +899,7 @@ export function StudyView({
                     <p className="study-menu-label">这份课件</p>
                     <button onClick={() => { setMoreOpen(false); setMaterialsOpen(true) }}>整份课件资料</button>
                     <button onClick={() => { setMoreOpen(false); setTeacherOpen(true) }}>老师档案</button>
-                    <button onClick={() => { setMoreOpen(false); onOpenDocs() }}>回到文稿库</button>
+                    <button onClick={() => { setMoreOpen(false); void runImport() }}>导入另一份课件</button>
                     <button disabled={busy !== null || !selectedDoc} onClick={() => { setMoreOpen(false); void createSession() }}>
                       用当前文稿再开一门
                     </button>
@@ -955,7 +1027,18 @@ export function StudyView({
                     <option value="teachback">复述</option>
                   </select>
                 </label>
-                <span className="ws-model"><i />{modelName || '模型未配置'}</span>
+                <label className="ws-model" title="切换模型">
+                  <i />
+                  <select
+                    value={modelName}
+                    onChange={(event) => void changeModel(event.target.value)}
+                    disabled={modelBusy}
+                    aria-label="切换模型"
+                  >
+                    {modelOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  <span className="ws-model-caret">⌄</span>
+                </label>
                 <span className="ws-mini-usage">课件 {tokenLabel(usageTotal)}</span>
                 <button className="ws-send" aria-label="发送" onClick={() => void sendQuestion()} disabled={busy !== null || !question.trim()}>
                   {busy === 'send' ? '…' : '↑'}

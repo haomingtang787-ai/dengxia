@@ -367,19 +367,19 @@ export function App() {
   const activeJob = detail?.job ?? null
   const invalidHighlights = highlights.filter((item) => !item.valid)
 
-  async function importFiles() {
-    if (!window.desk) return
+  async function importFiles(): Promise<string | null> {
+    if (!window.desk) return null
     setBusy(true)
     const picked = await window.desk.documents.pick()
     if (!picked.ok) {
       setNotice({ tone: 'bad', text: picked.error.message })
       setBusy(false)
-      return
+      return null
     }
     if (picked.data.cancelled) {
       setNotice({ tone: 'info', text: '没有选择文件。' })
       setBusy(false)
-      return
+      return null
     }
     let last: string | null = null
     for (const file of picked.data.files) {
@@ -393,6 +393,7 @@ export function App() {
     await refreshList()
     if (last) await openVersion(last)
     setBusy(false)
+    return last
   }
 
   async function togglePin(item: DocumentListItem) {
@@ -1044,7 +1045,7 @@ export function App() {
         </aside>
         <section className="panel stage">
           <div className="body">
-            {view === 'study' ? <StudyView notify={showNotice} documents={docs} selectedVersionId={selected} onOpenDocs={() => setView('doc')} onOpenReview={() => setView('review')} onOpenSettings={() => void openAi()} /> : null}
+            {view === 'study' ? <StudyView notify={showNotice} documents={docs} selectedVersionId={selected} onImport={() => importFiles()} onOpenReview={() => setView('review')} onOpenSettings={() => void openAi()} /> : null}
             {view === 'review' ? <ReviewView notify={showNotice} onExportCards={() => void exportCards()} onExportMisses={() => void exportMisses()} /> : null}
             {view === 'doc' ? (
               <>

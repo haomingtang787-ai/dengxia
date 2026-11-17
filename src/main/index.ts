@@ -357,6 +357,44 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 1600))
     return
   }
+  if (action === 'workspace-open') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    console.log('[smoke] model', JSON.stringify(await win.webContents.executeJavaScript(
+      `(() => {
+        const select = document.querySelector('.ws-model select');
+        return { value: select?.value ?? '', options: select ? [...select.options].map((option) => option.value) : [] };
+      })()`,
+    )))
+    return
+  }
+  if (action === 'workspace-model-switch') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    const switched = await win.webContents.executeJavaScript(
+      `(() => {
+        const select = document.querySelector('.ws-model select');
+        if (!select) return { error: 'no model select' };
+        const from = select.value;
+        const target = [...select.options].map((option) => option.value).find((value) => value !== from);
+        if (!target) return { from, error: 'only one option' };
+        select.value = target;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        return { from, target };
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    console.log('[smoke] model switch', JSON.stringify({ switched, now: await win.webContents.executeJavaScript(
+      `document.querySelector('.ws-model select')?.value ?? ''`,
+    ) }))
+    return
+  }
   if (action === 'workspace-card') {
     await new Promise((resolve) => setTimeout(resolve, 1600))
     await win.webContents.executeJavaScript(
