@@ -14,6 +14,7 @@ export function StudyTools({
   busy,
   onFocus,
   onRun,
+  only = null,
 }: {
   detail: StudySessionDetail
   unitOrdinal: number | null
@@ -23,6 +24,7 @@ export function StudyTools({
   busy: string | null
   onFocus: (tool: StudyToolKind | null) => void
   onRun: (tool: StudyToolKind, payload?: ToolPayload) => Promise<boolean>
+  only?: StudyToolKind | null
 }) {
   const [query, setQuery] = useState('')
   const [teachback, setTeachback] = useState('')
@@ -51,6 +53,22 @@ export function StudyTools({
   }
 
   const currentScope = unitOrdinal == null ? 'course' : `unit:${unitOrdinal}`
+  const focusOnly: StudyArtifact['kind'] | null = only === 'quiz-grade' ? 'quiz' : only
+  const showArtifact = (kind: StudyArtifact['kind']) => !focusOnly || focusOnly === kind
+  const focusTitle = focusOnly === 'quiz'
+    ? '这一讲的题测'
+    : focusOnly === 'summary'
+      ? '这一讲的总结'
+      : focusOnly === 'outline'
+        ? '这一讲的复习大纲'
+        : focusOnly === 'search'
+          ? '找原文'
+          : focusOnly === 'teachback'
+            ? '我讲给你听'
+            : '老师工具'
+  const focusHint = focusOnly === 'quiz'
+    ? '先答，再交给老师判；可以只交已答的题，每题都能回原页。'
+    : '只放这一项，不把总览、老师手记和别的生成物一起摊开。'
   const summary = latest('summary', currentScope) ?? latest('summary')
   const outline = latest('outline', currentScope) ?? latest('outline')
   const search = latest('search')
@@ -60,36 +78,40 @@ export function StudyTools({
 
   async function submitQuiz() {
     const questions = quiz?.body.questions ?? []
-    const filled = questions.map((question) => ({
-      questionId: question.id,
-      answer: (answers[question.id] ?? '').trim(),
-    }))
-    if (filled.some((item) => !item.answer)) {
-      setLocalError('每道题都写一句再交给老师。')
+    const filled = questions
+      .map((question, index) => ({
+        questionId: question.id,
+        answer: (answers[question.id] ?? '').trim(),
+        graded: Boolean(quiz?.body.results?.some((result) => result.index === index + 1)),
+      }))
+      .filter((item) => item.answer && !item.graded)
+    if (filled.length === 0) {
+      setLocalError('先写一题再交给老师；没答的题可以留着下次答。')
       return
     }
     setLocalError('')
-    const ok = await onRun('quiz-grade', { answers: filled })
-    if (ok) setAnswers({})
+    await onRun('quiz-grade', { answers: filled.map(({ questionId, answer }) => ({ questionId, answer })) })
   }
 
   return (
-    <section className="study-tools">
+    <section className={`study-tools${focusOnly ? ' focused' : ''}`}>
       <div className="study-tools-head">
         <div>
-          <h3>老师工具</h3>
-          <p>可以直接点，也可以直接在对话框里说“总结这一讲”“考考我”；右栏不重复放按钮墙。</p>
+          <h3>{focusTitle}</h3>
+          <p>{focusOnly ? focusHint : '可以直接点，也可以直接在对话框里说“总结这一讲”“考考我”；右栏不重复放按钮墙。'}</p>
         </div>
         <span className="chip">{detail.artifacts?.length ?? 0} 份生成物</span>
       </div>
 
-      <div className="study-tool-actions">
-        <button className="ghost" disabled={blocked} onClick={() => { onFocus('summary'); void onRun('summary') }}>总结这一讲</button>
-        <button className="ghost" disabled={blocked} onClick={() => { onFocus('quiz'); void onRun('quiz') }}>考考我这讲</button>
-        <button className="ghost" disabled={blocked} onClick={() => { onFocus('outline'); void onRun('outline') }}>列复习大纲</button>
-        <button className="ghost" disabled={blocked} onClick={() => onFocus('search')}>找原文</button>
-        <button className="ghost" disabled={blocked} onClick={() => onFocus('teachback')}>我讲给你听</button>
-      </div>
+      {!focusOnly ? (
+        <div className="study-tool-actions">
+          <button className="ghost" disabled={blocked} onClick={() => { onFocus('summary'); void onRun('summary') }}>总结这一讲</button>
+          <button className="ghost" disabled={blocked} onClick={() => { onFocus('quiz'); void onRun('quiz') }}>考考我这讲</button>
+          <button className="ghost" disabled={blocked} onClick={() => { onFocus('outline'); void onRun('outline') }}>列复习大纲</button>
+          <button className="ghost" disabled={blocked} onClick={() => onFocus('search')}>找原文</button>
+          <button className="ghost" disabled={blocked} onClick={() => onFocus('teachback')}>我讲给你听</button>
+        </div>
+      ) : null}
 
       {focus === 'search' ? (
         <div className="study-tool-input">
@@ -133,14 +155,15 @@ export function StudyTools({
       {localError ? <div className="banner bad">{localError}</div> : null}
 
       <div className="study-tool-artifacts">
-        {summary ? <SummaryArtifact artifact={summary} pages={pages} onOpenPage={onOpenPage} /> : null}
-        {outline ? <OutlineArtifact artifact={outline} /> : null}
-        {search ? <SearchArtifact artifact={search} /> : null}
-        {quiz ? <QuizArtifact artifact={quiz} answers={answers} setAnswers={setAnswers} onSubmit={submitQuiz} blocked={blocked} pages={pages} onOpenPage={onOpenPage} /> : null}
-        {teachbackArtifact ? <TeachbackArtifact artifact={teachbackArtifact} /> : null}
-        {!summary && !outline && !search && !quiz && !teachbackArtifact ? (
+        {showArtifact('summary') && summary ? <SummaryArtifact artifact={summary} pages={pages} onOpenPage={onOpenPage} /> : null}
+        {showArtifact('outline') && outline ? <OutlineArtifact artifact={outline} /> : null}
+        {showArtifact('search') && search ? <SearchArtifact artifact={search} /> : null}
+        {showArtifact('quiz') && quiz ? <QuizArtifact artifact={quiz} answers={answers} setAnswers={setAnswers} onSubmit={submitQuiz} blocked={blocked} pages={pages} onOpenPage={onOpenPage} /> : null}
+        {showArtifact('teachback') && teachbackArtifact ? <TeachbackArtifact artifact={teachbackArtifact} /> : null}
+        {!focusOnly && !summary && !outline && !search && !quiz && !teachbackArtifact ? (
           <p className="empty">还没有生成物。点“考考我”或“总结这一讲”，结果会落在课程资料里。</p>
         ) : null}
+        {focusOnly && !quiz && focusOnly === 'quiz' ? <p className="empty">题测还没生成；点右栏“题测”开始出题。</p> : null}
       </div>
     </section>
   )
@@ -247,10 +270,18 @@ function QuizArtifact({
   const questions = artifact.body.questions ?? []
   const resultFor = (index: number): StudyQuizResult | null =>
     artifact.body.results?.find((result) => result.index === index + 1) ?? null
+  const gradedCount = artifact.body.results?.length ?? 0
+  const allGraded = questions.length > 0 && gradedCount >= questions.length
+  const answeredCount = questions.filter((question, index) =>
+    !resultFor(index + 1) && (answers[question.id] ?? '').trim()
+  ).length
 
   return (
     <section className="study-tool-card">
-      <ArtifactHead artifact={artifact} chip={artifact.body.graded ? '已判' : '先答后判'} />
+      <ArtifactHead
+        artifact={artifact}
+        chip={allGraded ? '已判' : gradedCount ? `${gradedCount}/${questions.length} 已判` : '先答后判'}
+      />
       {questions.map((question, index) => {
         const pageNumber = question.pageNumber ?? null
         const page = pageForPageNumber(pages, pageNumber)
@@ -279,8 +310,7 @@ function QuizArtifact({
                   </button>
                 ) : null}
               </div>
-            ) : null}
-            {artifact.body.graded ? null : (
+            ) : (
               <textarea
                 rows={2}
                 value={answers[question.id] ?? ''}
@@ -292,16 +322,21 @@ function QuizArtifact({
           </div>
         )
       })}
-      {artifact.body.graded ? (
+      {allGraded ? (
         <div className="study-tool-feedback">
           <b>老师反馈</b>
           <p>{artifact.body.feedback}</p>
           {artifact.body.gaps?.length ? <p className="quiet">还缺：{artifact.body.gaps.join('；')}</p> : null}
         </div>
       ) : (
-        <button className="primary" disabled={blocked} onClick={onSubmit}>
-          {blocked ? '老师正在看…' : '交给老师判'}
-        </button>
+        <>
+          {gradedCount ? (
+            <p className="quiet">已判 {gradedCount} 题；没答的题可以继续写，再交给老师。</p>
+          ) : null}
+          <button className="primary" disabled={blocked || answeredCount === 0} onClick={onSubmit}>
+            {blocked ? '老师正在看…' : answeredCount ? `交给老师判（${answeredCount} 题）` : '先写一题再交给老师'}
+          </button>
+        </>
       )}
     </section>
   )

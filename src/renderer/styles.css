@@ -511,6 +511,11 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-actions { flex-wrap: wrap; justify-content: flex-end; }
 .study-progress { display: flex; gap: 10px; align-items: center; border: 1px solid #cfe6df; background: #f2fbf8; color: #254f47; border-radius: 12px; padding: 10px 14px; }
 .study-progress p { margin: 0; font-size: 13px; }
+.study-ai-guide { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 10px 18px 0; padding: 11px 14px; border: 1px solid #ead9b8; border-radius: 12px; background: #fffaf0; color: #4b3a1c; }
+.study-ai-guide > div { min-width: 0; }
+.study-ai-guide b { font-size: 13px; }
+.study-ai-guide p { margin: 4px 0 0; font-size: 12px; line-height: 1.55; color: #77684f; }
+.study-ai-guide .primary { flex: 0 0 auto; }
 /* 有课程时先给一条可点的学习路径：选讲 -> 读讲稿 -> 答停一下 -> 问老师。 */
 .study-path {
   border: 1px solid #dce9e4; border-radius: 14px; padding: 10px 14px 12px;
@@ -822,6 +827,10 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .teacher-note-editor { display: flex; flex-direction: column; gap: 8px; }
 .study-field textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; line-height: 1.6; color: #243247; border: 1px solid #dfe5e2; border-radius: 9px; padding: 7px 9px; background: #fff; resize: vertical; }
 .course-materials { width: min(920px, 94vw); }
+.course-materials.focused { width: min(620px, 94vw); }
+.course-materials.focused .course-materials-focus { display: grid; grid-template-columns: minmax(0, 1fr); }
+.course-materials.focused .study-tools { border: 0; padding: 0; background: transparent; }
+.course-materials.focused .study-tool-artifacts { grid-template-columns: 1fr; }
 .course-materials header p { margin: 6px 0 0; }
 .course-materials-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
 .course-materials-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -888,6 +897,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-tool-card .primary, .study-tool-card .ghost { align-self: flex-start; }
 @media (max-width: 640px) {
   .teacher-profile-grid, .course-materials-body, .study-tool-artifacts { grid-template-columns: 1fr; }
+  .study-ai-guide { flex-direction: column; align-items: stretch; }
   .teacher-danger { flex-direction: column; align-items: flex-start; }
 }
 

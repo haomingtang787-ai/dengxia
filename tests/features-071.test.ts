@@ -311,6 +311,61 @@ describe('0.7.1 工具与落点', () => {
     expect(miss?.page_number).toBe(3)
   })
 
+  it('题测可以只答一题就判，未答的题保留可继续答', async () => {
+    const app = service(fakeFetch((system, user) => {
+      if (system.includes('出题')) {
+        return JSON.stringify({
+          questions: [
+            { prompt: '为什么 DRAM 需要刷新？', hint: '从电容和漏电想。', source: 'DRAM 用电容存储电荷，需要周期性刷新。' },
+            { prompt: 'SRAM 和 DRAM 各牺牲了什么？', hint: '速度和面积。', source: 'SRAM 用触发器存储一位，速度快但面积大。' },
+          ],
+        })
+      }
+      if (system.includes('判题')) {
+        const answered = user.includes('第 2 题') ? 2 : 1
+        return JSON.stringify({
+          feedback: answered === 1 ? '第一题抓住了漏电。' : '第二题说到了面积代价。',
+          gaps: [],
+          results: [{ index: answered, correct: true, explain: `第 ${answered} 题答对了。` }],
+        })
+      }
+      return '{}'
+    }))
+    const quiz = await app.tool({ sessionId, tool: 'quiz', unitOrdinal: 1 })
+    expect(quiz.ok).toBe(true)
+    if (!quiz.ok) return
+    const artifact = quiz.data.artifacts.find((item) => item.kind === 'quiz' && item.scope === 'unit:1')
+    const questions = artifact?.body.questions ?? []
+    expect(questions).toHaveLength(2)
+
+    const first = await app.tool({
+      sessionId,
+      tool: 'quiz-grade',
+      unitOrdinal: 1,
+      answers: [{ questionId: questions[0].id, answer: '电容会漏电，所以要定期补充电荷。' }],
+    })
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    const afterFirst = first.data.artifacts.find((item) => item.kind === 'quiz' && item.scope === 'unit:1')
+    expect(afterFirst?.body.answers).toHaveLength(1)
+    expect(afterFirst?.body.results).toHaveLength(1)
+    expect(afterFirst?.body.graded).toBe(false)
+    expect(afterFirst?.body.results?.[0]?.index).toBe(1)
+
+    const second = await app.tool({
+      sessionId,
+      tool: 'quiz-grade',
+      unitOrdinal: 1,
+      answers: [{ questionId: questions[1].id, answer: 'SRAM 快但面积大，DRAM 慢但面积小。' }],
+    })
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    const afterSecond = second.data.artifacts.find((item) => item.kind === 'quiz' && item.scope === 'unit:1')
+    expect(afterSecond?.body.answers).toHaveLength(2)
+    expect(afterSecond?.body.results).toHaveLength(2)
+    expect(afterSecond?.body.graded).toBe(true)
+  })
+
   it('teachback 空答案拒绝；有缺口时写入 gaps', async () => {
     const app = service(fakeFetch((system) => system.includes('复述') ? JSON.stringify({
       feedback: '你讲清了 DRAM 的电容，但没讲 SRAM 的触发器。',

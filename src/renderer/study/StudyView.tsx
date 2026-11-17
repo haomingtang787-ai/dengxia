@@ -27,6 +27,7 @@ import { TeacherProfile } from './TeacherProfile'
 import { StudyTools } from './StudyTools'
 import { PagePeek } from './PagePeek'
 import { bboxStyle, citationPage, evidenceLayout } from './evidence'
+import { documentWaitText, isDocumentReady, scrollTargetSelector } from './ux'
 import {
   AVOID_OPTIONS,
   DEFAULT_HABITS,
@@ -102,6 +103,7 @@ export function StudyView({
   onImport,
   onOpenReview,
   onOpenSettings,
+  aiConfigured,
 }: {
   notify: Notify
   documents: DocumentListItem[]
@@ -109,6 +111,7 @@ export function StudyView({
   onImport: () => Promise<string | null>
   onOpenReview: () => void
   onOpenSettings: () => void
+  aiConfigured: boolean | null
 }) {
   const api = window.desk
   const [courses, setCourses] = useState<StudyCourseTree | null>(null)
@@ -124,6 +127,7 @@ export function StudyView({
   const [modelName, setModelName] = useState<string>(DEFAULT_AI.model)
   const [modelChoices, setModelChoices] = useState<string[]>([])
   const [modelBusy, setModelBusy] = useState(false)
+  const [aiReady, setAiReady] = useState<boolean | null>(aiConfigured)
   const [importing, setImporting] = useState(false)
   const [railBusy, setRailBusy] = useState<'review' | 'cards' | null>(null)
   const [railNote, setRailNote] = useState('')
@@ -157,6 +161,13 @@ export function StudyView({
     () => documents.find((doc) => doc.documentVersionId === selectedVersionId) ?? documents[0] ?? null,
     [documents, selectedVersionId],
   )
+  const configured = aiConfigured ?? aiReady
+  const selectedReady = Boolean(selectedDoc && isDocumentReady(selectedDoc))
+  const waitingText = selectedDoc ? documentWaitText(selectedDoc) : ''
+
+  useEffect(() => {
+    setAiReady(aiConfigured)
+  }, [aiConfigured])
 
   const refreshCourses = useCallback(async () => {
     if (!api) return
@@ -240,7 +251,10 @@ export function StudyView({
       if (listResult.ok) setSessions(listResult.data.items)
       else notify('bad', listResult.error.message)
       if (habitsResult.ok) setHabits(habitsResult.data)
-      if (aiResult.ok && aiResult.data.model) setModelName(aiResult.data.model)
+      if (aiResult.ok) {
+        setAiReady(aiResult.data.configured)
+        if (aiResult.data.model) setModelName(aiResult.data.model)
+      }
       if (listResult.ok) {
         const preferred = selectedVersionId
           ? listResult.data.items.find((item) => item.documentVersionId === selectedVersionId)
@@ -350,10 +364,14 @@ export function StudyView({
 
   useEffect(() => {
     if (!stickBottom.current) return
-    const messages = streamRef.current?.querySelectorAll<HTMLElement>('.ws-message')
-    const last = messages?.item(messages.length - 1)
-    if (!last) return
-    last.scrollIntoView({ block: 'end', behavior: 'smooth' })
+    const stream = streamRef.current
+    if (!stream) return
+    const lastMessageId = detail?.messages[detail.messages.length - 1]?.id ?? null
+    const selector = scrollTargetSelector(lastMessageId, busy === 'send')
+    if (!selector) return
+    const target = stream.querySelector<HTMLElement>(selector)
+    if (!target) return
+    target.scrollIntoView({ block: 'end', behavior: 'smooth' })
     if (busy !== 'send') stickBottom.current = false
   }, [detail?.messages.length, busy])
 
@@ -446,6 +464,11 @@ export function StudyView({
 
   async function runImport() {
     if (importing) return
+    if (configured === false) {
+      notify('info', '还没有配置模型。先填好模型和 API Key，再导入课件。')
+      onOpenSettings()
+      return
+    }
     setImporting(true)
     importPending.current = true
     try {
@@ -570,6 +593,17 @@ export function StudyView({
       notify('bad', '先在左边选一份文稿，或者在「文稿」里上传课件。')
       return
     }
+    if (configured === false) {
+      notify('info', '还没有配置模型。先填好模型和 API Key，再让老师完整读懂这份课件。')
+      onOpenSettings()
+      return
+    }
+    if (!selectedReady) {
+      const text = documentWaitText(selectedDoc) || '这份课件还在解析，解析完会自动拆课。'
+      setError('')
+      notify('info', text)
+      return
+    }
     setBusy('create')
     setError('')
     setProgress(null)
@@ -602,10 +636,16 @@ export function StudyView({
     if (loading || detail || busy) return
     if (!selectedDoc) return
     if (sessions.some((item) => item.documentVersionId === selectedDoc.documentVersionId)) return
+    if (configured === false) return
+    // 解析没完成就建课，服务端只会回“这份文稿还没有可读内容”。等 ready 再自动接住。
+    if (!isDocumentReady(selectedDoc)) {
+      setError('')
+      return
+    }
     if (autoStarted.current === selectedDoc.documentVersionId) return
     autoStarted.current = selectedDoc.documentVersionId
     void createSession()
-  }, [loading, detail, busy, selectedDoc, sessions, activeCourseId])
+  }, [loading, detail, busy, selectedDoc, sessions, activeCourseId, configured])
 
   async function sendQuestion(textOverride?: string) {
     if (!api || !detail || busy) return
@@ -746,6 +786,7 @@ export function StudyView({
     setUnitId(null)
     setMoreOpen(false)
     setMaterialsOpen(false)
+    setToolFocus(null)
     setConfirmAction(null)
     autoStarted.current = docId
     setSessions(result.data.items)
@@ -754,6 +795,15 @@ export function StudyView({
   }
 
   const usageTotal = detail ? detail.usage.promptTokens + detail.usage.completionTokens : 0
+  const aiGuide = configured === false ? (
+    <section className="study-ai-guide">
+      <div>
+        <b>先让老师能开口</b>
+        <p>这台电脑上还没有配置模型。填好 Base URL、API Key 和模型名，导入、拆课和答疑才会工作；课件仍然只留在本机。</p>
+      </div>
+      <button className="primary" onClick={onOpenSettings}>配置模型</button>
+    </section>
+  ) : null
 
   if (loading) {
     return <div className="study-empty"><p className="quiet">正在读取你的课程…</p></div>
@@ -931,13 +981,25 @@ export function StudyView({
             <div className="ws-head-actions">
               <button className="ghost" onClick={() => setTeacherOpen(true)}>老师档案</button>
               {selectedDoc ? (
-                <button className="primary" onClick={() => void createSession()} disabled={busy !== null}>
-                  {busy === 'create' ? '正在完整读懂并拆课…' : '完整读懂并拆课'}
+                <button
+                  className="primary"
+                  onClick={() => void createSession()}
+                  disabled={busy !== null || !selectedReady}
+                  title={!selectedReady ? '等这份课件解析完成后再拆课' : undefined}
+                >
+                  {!selectedReady ? '等解析完成' : busy === 'create' ? '正在完整读懂并拆课…' : '完整读懂并拆课'}
                 </button>
               ) : null}
             </div>
           </header>
-          {error ? <div className="banner bad">{error}</div> : null}
+          {aiGuide}
+          {error && !waitingText ? <div className="banner bad">{error}</div> : null}
+          {selectedDoc && !selectedReady && waitingText ? (
+            <div className="study-progress">
+              <span className="pulse-dot" />
+              <p>{waitingText}</p>
+            </div>
+          ) : null}
           {busy === 'create' ? (
             <div className="study-progress">
               <span className="pulse-dot" />
@@ -1033,13 +1095,13 @@ export function StudyView({
             </div>
             <div className="ws-head-actions">
               <button className="ghost ws-context-toggle" onClick={() => setRightOpen((open) => !open)}>这一讲</button>
-              <button className="ghost ws-materials-btn" onClick={() => setMaterialsOpen(true)}>整份课件</button>
+              <button className="ghost ws-materials-btn" onClick={() => { setToolFocus(null); setMaterialsOpen(true) }}>整份课件</button>
               <div className="study-manage">
                 <button className="ghost" onClick={() => { setMoreOpen((open) => !open); setConfirmAction(null) }}>更多</button>
                 {moreOpen ? (
                   <div className="study-manage-menu ws-more-menu">
                     <p className="study-menu-label">这份课件</p>
-                    <button onClick={() => { setMoreOpen(false); setMaterialsOpen(true) }}>整份课件资料</button>
+                    <button onClick={() => { setMoreOpen(false); setToolFocus(null); setMaterialsOpen(true) }}>整份课件资料</button>
                     <button onClick={() => { setMoreOpen(false); setTeacherOpen(true) }}>老师档案</button>
                     <button onClick={() => { setMoreOpen(false); void runImport() }}>导入另一份课件</button>
                     <button disabled={busy !== null || !selectedDoc} onClick={() => { setMoreOpen(false); void createSession() }}>
@@ -1047,7 +1109,7 @@ export function StudyView({
                     </button>
                     <div className="study-menu-divider" />
                     <p className="study-menu-label">收尾与整理</p>
-                    <button onClick={() => { setMoreOpen(false); setMaterialsOpen(true) }}>学习总结与老师手记</button>
+                    <button onClick={() => { setMoreOpen(false); setToolFocus(null); setMaterialsOpen(true) }}>学习总结与老师手记</button>
                     <button onClick={() => (confirmAction === 'chat' ? void clearChat() : setConfirmAction('chat'))}>
                       {confirmAction === 'chat' ? '再点一次，清除全部对话' : '清除对话记录'}
                     </button>
@@ -1063,6 +1125,7 @@ export function StudyView({
             </div>
           </header>
 
+          {aiGuide}
           {error ? <div className="banner bad">{error}</div> : null}
           {busy === 'create' ? (
             <div className="study-progress">
@@ -1111,7 +1174,7 @@ export function StudyView({
                     />
                   ))}
                   {busy === 'send' && activeUnit?.id === unit.id ? (
-                    <div className="ws-message assistant pending">
+                    <div className="ws-message assistant pending" data-pending-answer>
                       <span className="ws-avatar">师</span>
                       <div className="ws-bubble"><p>正在对照这一讲的讲义页回答…</p></div>
                     </div>
@@ -1139,7 +1202,7 @@ export function StudyView({
                 <button onClick={() => quickAsk('别继续讲了，直接考我这一讲的两个核心问题。')}>直接考我</button>
               </div>
               <div className="ws-composer-input">
-                <button className="ws-plus" title="打开整份课件与资料" onClick={() => setMaterialsOpen(true)}>＋</button>
+                <button className="ws-plus" title="打开整份课件与资料" onClick={() => { setToolFocus(null); setMaterialsOpen(true) }}>＋</button>
                 <textarea
                   ref={questionRef}
                   value={question}
@@ -1206,7 +1269,7 @@ export function StudyView({
       {detail ? (
         <CourseMaterials
           open={materialsOpen}
-          onClose={() => setMaterialsOpen(false)}
+          onClose={() => { setMaterialsOpen(false); setToolFocus(null) }}
           detail={detail}
           busy={busy}
           notify={notify}
@@ -1267,7 +1330,7 @@ function ChatMessage({
 }) {
   if (message.role === 'user') {
     return (
-      <div className="ws-message user">
+      <div className="ws-message user" data-message-id={message.id}>
         <div className="ws-message-main">
           <div className="ws-message-head user">
             <span>你</span>
@@ -1283,7 +1346,7 @@ function ChatMessage({
   const citations = message.citations
   const { cards, more: chips } = evidenceLayout(citations)
   return (
-    <div className="ws-message assistant">
+    <div className="ws-message assistant" data-message-id={message.id}>
       <span className="ws-avatar">师</span>
       <div className="ws-message-main">
         <div className="ws-message-head">
@@ -1838,19 +1901,51 @@ function CourseMaterials({
   onNoteChange: (note: StudySessionDetail['teacherNote']) => void
 }) {
   if (!open) return null
+  const focused = toolFocus !== null
+  const focusLabel = toolFocus === 'quiz' || toolFocus === 'quiz-grade'
+    ? '这一讲的题测'
+    : toolFocus === 'summary'
+      ? '这一讲的总结'
+      : toolFocus === 'outline'
+        ? '这一讲的复习大纲'
+        : toolFocus === 'search'
+          ? '找原文'
+          : toolFocus === 'teachback'
+            ? '我讲给你听'
+            : '老师工具'
+  const tools = (
+    <StudyTools
+      detail={detail}
+      unitOrdinal={unitOrdinal}
+      pages={pages}
+      onOpenPage={onOpenPage}
+      focus={toolFocus}
+      busy={busy}
+      onFocus={onToolFocus}
+      onRun={onTool}
+      only={toolFocus}
+    />
+  )
   return (
     <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <div className="modal course-materials">
+      <div className={`modal course-materials${focused ? ' focused' : ''}`}>
         <header>
           <div>
-            <h2>整份课件资料</h2>
-            <p className="quiet">总览、学习分析、老师手记、老师工具和用量都放在这里。</p>
+            <h2>{focused ? focusLabel : '整份课件资料'}</h2>
+            <p className="quiet">
+              {focused
+                ? '只放这一项，不把总览、老师手记和别的生成物一起摊开。'
+                : '总览、学习分析、老师手记、老师工具和用量都放在这里。'}
+            </p>
           </div>
           <button className="icon-btn" title="关闭" onClick={onClose}>×</button>
         </header>
 
-        <div className="course-materials-body">
-          <div className="course-materials-column">
+        {focused ? (
+          <div className="course-materials-focus">{tools}</div>
+        ) : (
+          <div className="course-materials-body">
+            <div className="course-materials-column">
             <section className="study-overview">
               <div className="study-outline-title">
                 <h3>整份材料总览</h3>
@@ -1896,17 +1991,9 @@ function CourseMaterials({
             <UsageCard usage={detail.usage} sessionId={detail.sessionId} />
           </div>
 
-          <StudyTools
-            detail={detail}
-            unitOrdinal={unitOrdinal}
-            pages={pages}
-            onOpenPage={onOpenPage}
-            focus={toolFocus}
-            busy={busy}
-            onFocus={onToolFocus}
-            onRun={onTool}
-          />
+          {tools}
         </div>
+        )}
       </div>
     </div>
   )

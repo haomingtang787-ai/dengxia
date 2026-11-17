@@ -661,12 +661,20 @@
 .ws-study .ws-center {
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: 86px minmax(0, 1fr) 150px;
+  display: flex;
+  flex-direction: column;
   border: 0;
   border-radius: 0;
   background: var(--ws-paper);
   box-shadow: none;
+}
+
+.ws-study .ws-center > .ws-stream {
+  flex: 1 1 auto;
+}
+
+.ws-study .ws-center > .ws-composer {
+  flex: 0 0 auto;
 }
 
 .ws-study .ws-center-head {

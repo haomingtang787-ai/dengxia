@@ -329,7 +329,7 @@ export function buildStudyQuizGradePrompt(input: {
   title: string
   material: string
   unit: StudyUnit | null
-  questions: Array<{ id: string; prompt: string; source: string }>
+  questions: Array<{ id: string; prompt: string; source: string; index?: number }>
   answers: Array<{ questionId: string; answer: string }>
 }): { system: string; user: string } {
   const answerMap = new Map(input.answers.map((item) => [item.questionId, item.answer]))
@@ -338,15 +338,15 @@ export function buildStudyQuizGradePrompt(input: {
     user: [
       `课程：${input.title}`,
       input.unit ? `范围：第 ${input.unit.ordinal + 1} 讲《${input.unit.title}》` : '范围：整门课',
-      '题目与学生作答：',
+      '题目与学生作答（本次只判下面这些题，未列出的题不要判）：',
       ...input.questions.map((question, index) => [
-        `第 ${index + 1} 题：${question.prompt}`,
+        `第 ${question.index ?? index + 1} 题：${question.prompt}`,
         `原文：${question.source}`,
         `学生答：${answerMap.get(question.id) ?? '（未作答）'}`,
       ].join('\n')),
       '材料：',
       input.material,
-      '请判题并写具体反馈。',
+      '请只判本次提交的题并写具体反馈；results 的 index 用题目原题号。',
     ].join('\n\n'),
   }
 }

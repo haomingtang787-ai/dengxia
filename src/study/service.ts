@@ -569,23 +569,31 @@ export class StudyService {
         const quizBody = parseArtifactBody(existing.body_json)
         const questions = Array.isArray(quizBody.questions) ? quizBody.questions as StudyQuizQuestion[] : []
         if (questions.length === 0) throw new ArgumentError('这份题测没有题目，请重新出题。')
-        if (input.answers.length !== questions.length) throw new ArgumentError('还有题没答，答完再判。')
+        const answerMap = new Map(input.answers.map((answer) => [answer.questionId, answer.answer]))
+        const submittedQuestions = questions.filter((question) => answerMap.has(question.id))
+        if (submittedQuestions.length === 0) throw new ArgumentError('先写下至少一道题的答案。')
         for (const answer of input.answers) {
           if (!questions.some((question) => question.id === answer.questionId)) {
             throw new ArgumentError('提交的题目不属于这次题测。')
           }
         }
+        const submittedIndices = new Set(submittedQuestions.map((question) => questions.indexOf(question) + 1))
         const material = studyMaterial(units, input.unitOrdinal)
         const prompt = buildStudyQuizGradePrompt({
           title: session.title,
           material,
           unit,
-          questions: questions.map((question) => ({ id: question.id, prompt: question.prompt, source: question.source })),
+          // 只把本次作答的题交给模型，未答的题不判、不记错；index 保持原题号。
+          questions: submittedQuestions.map((question) => ({
+            id: question.id,
+            prompt: question.prompt,
+            source: question.source,
+            index: questions.indexOf(question) + 1,
+          })),
           answers: input.answers,
         })
         const raw = await client.complete(prompt.system, prompt.user, 1800, 'disabled', 'tool-quiz-grade')
         const grade = parseQuizGrade(raw)
-        const answerMap = new Map(input.answers.map((answer) => [answer.questionId, answer.answer]))
         const unitOrdinal = unit?.ordinal ?? -1
         const unitPageNumber = singlePageNumber(unit?.source ?? '')
         // 逐题结果才落账；模型没按契约回 results 时，至少把这次缺口记成一条可重练的错题，避免题白做。
@@ -593,6 +601,7 @@ export class StudyService {
           // 旧的“整次缺口”聚合错题被逐题结果取代，先关掉，避免重复。
           this.store.resolveMissByQuestion(session.id, unitOrdinal, 'grade-gaps', stamp)
           for (const result of grade.results) {
+            if (!submittedIndices.has(result.index)) continue
             const question = questions[result.index - 1]
             if (!question) continue
             const answer = answerMap.get(question.id) ?? ''
@@ -638,14 +647,26 @@ export class StudyService {
           // 这次没有缺口，旧的聚合错题也应消除。
           this.store.resolveMissByQuestion(session.id, unitOrdinal, 'grade-gaps', stamp)
         }
+        const previousAnswers = Array.isArray(quizBody.answers) ? quizBody.answers as StudyQuizAnswer[] : []
+        const previousResults = Array.isArray(quizBody.results)
+          ? quizBody.results.filter((result) => !submittedIndices.has(result.index))
+          : []
+        const mergedAnswers = [
+          ...previousAnswers.filter((answer) => !answerMap.has(answer.questionId)),
+          ...input.answers,
+        ]
+        const mergedResults = [
+          ...previousResults,
+          ...grade.results.filter((result) => submittedIndices.has(result.index)),
+        ].sort((a, b) => a.index - b.index)
         this.saveToolArtifact(session.id, 'quiz', scope, existing.title, {
           ...quizBody,
           questions,
-          answers: input.answers,
-          graded: true,
+          answers: mergedAnswers,
+          graded: mergedResults.length >= questions.length,
           feedback: grade.feedback,
           gaps: grade.gaps,
-          results: grade.results,
+          results: mergedResults,
         }, stamp)
         return ok(requestId, this.detail(session.id))
       }

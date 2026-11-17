@@ -101,7 +101,16 @@ export function App() {
     if (requested === 'study' || requested === 'class') return 'study'
     return 'study'
   })
+  const viewRef = useRef(view)
+  useEffect(() => {
+    viewRef.current = view
+  }, [view])
   const showNotice = useCallback((tone: 'info' | 'bad', text: string) => setNotice({ tone, text }), [])
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(null), notice.tone === 'bad' ? 12000 : 8000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
   const [aiOpen, setAiOpen] = useState(false)
   // 左侧文稿栏可收起：听课时把宽度让给讲稿。
   const [libraryOpen, setLibraryOpen] = useState(true)
@@ -172,7 +181,7 @@ export function App() {
     setTotal(result.data.total)
   }, [])
 
-  const openVersion = useCallback(async (documentVersionId: string, preferredPage?: number) => {
+  const openVersion = useCallback(async (documentVersionId: string, preferredPage?: number, autoRead = true) => {
     if (!window.desk) return
     const [got, loadedPages, loose, imageReadings, researchItems, highlightItems] = await Promise.all([
       window.desk.documents.get({ documentVersionId }),
@@ -198,7 +207,7 @@ export function App() {
     setAutoStatuses({})
     const nextIndex = preferredPage ? Math.max(0, loadedPages.findIndex((page) => page.ordinal === preferredPage)) : 0
     setPageIndex(nextIndex < 0 ? 0 : nextIndex)
-    void autoReadVersion(documentVersionId)
+    if (autoRead) void autoReadVersion(documentVersionId)
   }, [])
 
   const openSearchHit = useCallback(async (hit: SearchHit) => {
@@ -262,7 +271,7 @@ export function App() {
       if (event.state !== 'queued' && event.state !== 'running') {
         void refreshList()
         setSelected((current) => {
-          if (current) void openVersion(current)
+          if (current) void openVersion(current, undefined, viewRef.current === 'doc')
           return current
         })
       }
@@ -351,7 +360,7 @@ export function App() {
     const versionId = docs[0].documentVersionId
     if (studyAutoOpen.current === versionId) return
     studyAutoOpen.current = versionId
-    void openVersion(versionId)
+    void openVersion(versionId, undefined, false)
   }, [booting, view, selected, docs, openVersion])
 
   useEffect(() => {
@@ -391,7 +400,7 @@ export function App() {
       }
     }
     await refreshList()
-    if (last) await openVersion(last)
+    if (last) await openVersion(last, undefined, view !== 'study')
     setBusy(false)
     return last
   }
@@ -702,7 +711,7 @@ export function App() {
         if (!configured) {
           showNotice('info', '已用本机 OCR 兜底识别。填好模型后重新打开文稿，会自动让 AI 读懂和查证。')
         } else if (errors.length) {
-          showNotice('bad', `自动读懂完成，但有 ${errors.length} 处没成功：${errors[0]}`)
+          showNotice('info', `自动读懂完成，有 ${errors.length} 处辅助信息没补上：${errors[0]}。讲稿和页证据不受影响。`)
         } else {
           showNotice('info', `已自动读懂 ${loaded.length} 页：AI 知识点、联网核对都完成。`)
         }
@@ -887,7 +896,7 @@ export function App() {
                 <button className={`tab ${view === 'study' ? 'active' : ''}`} onClick={() => setView('study')}>老师</button>
                 <button className={`tab ${view === 'review' ? 'active' : ''}`} onClick={() => setView('review')}>复习</button>
               </nav>
-              <button className="ghost" onClick={() => void openAi()}>模型{aiStatus?.configured ? ' · 已配置' : ''}</button>
+              <button className="ghost" onClick={() => void openAi()}>模型{aiStatus?.configured ? ' · 已配置' : aiStatus ? ' · 未配置' : ''}</button>
             </div>
             <p className="quiet">没有账号，没有云同步；模型只用你自己填的那一个。</p>
           </div>
@@ -1046,7 +1055,7 @@ export function App() {
         </aside>
         <section className="panel stage">
           <div className="body">
-            {view === 'study' ? <StudyView notify={showNotice} documents={docs} selectedVersionId={selected} onImport={() => importFiles()} onOpenReview={() => setView('review')} onOpenSettings={() => void openAi()} /> : null}
+            {view === 'study' ? <StudyView notify={showNotice} documents={docs} selectedVersionId={selected} onImport={() => importFiles()} onOpenReview={() => setView('review')} onOpenSettings={() => void openAi()} aiConfigured={aiStatus?.configured ?? null} /> : null}
             {view === 'review' ? <ReviewView notify={showNotice} onExportCards={() => void exportCards()} onExportMisses={() => void exportMisses()} onBack={() => setView('study')} /> : null}
             {view === 'doc' ? (
               <>
