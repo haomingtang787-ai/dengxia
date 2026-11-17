@@ -21,7 +21,13 @@ export type UpdateDownloadProgress = { received: number; total: number; percent:
 
 export type UpdateDownloadResult = { filePath: string; size: number }
 
-export type ReleaseAsset = { name?: unknown; size?: unknown; browser_download_url?: unknown }
+export type ReleaseAsset = {
+  name?: unknown
+  size?: unknown
+  /** GitHub API 的 asset endpoint；当前网络下比 browser_download_url 更可靠。 */
+  url?: unknown
+  browser_download_url?: unknown
+}
 
 /** 只认 `DengXia-setup-x.y.z.exe`，避免把 blockmap 或别的文件当安装包。 */
 export function pickSetupAsset(
@@ -29,13 +35,18 @@ export function pickSetupAsset(
 ): Pick<UpdateCheckResult, 'assetUrl' | 'assetName' | 'assetSize'> {
   const found = (assets ?? []).find((asset) => {
     const name = typeof asset.name === 'string' ? asset.name : ''
-    return /^DengXia-setup-.*\.exe$/i.test(name) && typeof asset.browser_download_url === 'string'
+    return /^DengXia-setup-.*\.exe$/i.test(name)
+      && (typeof asset.url === 'string' || typeof asset.browser_download_url === 'string')
   })
-  if (!found || typeof found.browser_download_url !== 'string' || typeof found.name !== 'string') {
+  if (!found || typeof found.name !== 'string') {
     return { assetUrl: null, assetName: null, assetSize: null }
   }
+  const assetUrl = typeof found.url === 'string'
+    ? found.url
+    : typeof found.browser_download_url === 'string' ? found.browser_download_url : ''
+  if (!assetUrl) return { assetUrl: null, assetName: null, assetSize: null }
   return {
-    assetUrl: found.browser_download_url,
+    assetUrl,
     assetName: found.name,
     assetSize: typeof found.size === 'number' && Number.isFinite(found.size) ? found.size : null,
   }

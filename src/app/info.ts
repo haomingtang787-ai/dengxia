@@ -103,7 +103,10 @@ export class AppInfoService {
       await fs.promises.rm(destination, { force: true })
 
       const response = await fetch(input.assetUrl, {
-        headers: { 'user-agent': 'dengxia-app' },
+        headers: {
+          'user-agent': 'dengxia-app',
+          accept: 'application/octet-stream',
+        },
         signal: AbortSignal.timeout(600_000),
         redirect: 'follow',
       })
@@ -183,10 +186,27 @@ function parseDownloadBody(body: unknown): { assetUrl: string; assetName: string
   const raw = body as Record<string, unknown>
   const assetUrl = typeof raw.assetUrl === 'string' ? raw.assetUrl : ''
   const assetName = typeof raw.assetName === 'string' ? raw.assetName : ''
-  if (!/^https:\/\/github\.com\//.test(assetUrl) || !/\/releases\/download\//.test(assetUrl)) {
+  if (!isAllowedAssetUrl(assetUrl)) {
     throw new Error('下载地址不是 GitHub release。')
   }
   if (!/^DengXia-setup-.*\.exe$/i.test(assetName)) throw new Error('安装包名字不对。')
   const assetSize = typeof raw.assetSize === 'number' && Number.isFinite(raw.assetSize) ? raw.assetSize : null
   return { assetUrl, assetName, assetSize }
+}
+
+/** 只接受 GitHub release 页面地址，或 GitHub API 的 release asset endpoint。 */
+function isAllowedAssetUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'https:' || url.username || url.password) return false
+    if (url.hostname === 'github.com') {
+      return /^\/[^/]+\/[^/]+\/releases\/download\//.test(url.pathname)
+    }
+    if (url.hostname === 'api.github.com') {
+      return /^\/repos\/[^/]+\/[^/]+\/releases\/assets\/\d+\/?$/.test(url.pathname)
+    }
+    return false
+  } catch {
+    return false
+  }
 }

@@ -14,6 +14,7 @@ vi.mock('electron', () => ({
 import { AppInfoService } from '../src/app/info'
 
 const assetUrl = 'https://github.com/haomingtang787-ai/dengxia/releases/download/v0.5.6/DengXia-setup-0.5.6.exe'
+const apiAssetUrl = 'https://api.github.com/repos/haomingtang787-ai/dengxia/releases/assets/123456'
 const assetName = 'DengXia-setup-0.5.6.exe'
 const bytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
 
@@ -39,6 +40,26 @@ describe('应用内更新下载', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.data.size).toBe(bytes.byteLength)
+    expect(fs.readFileSync(result.data.filePath)).toEqual(Buffer.from(bytes))
+    expect(events.at(-1)?.percent).toBe(100)
+  })
+
+  it('接受 API asset 地址并发送二进制 Accept', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(bytes, {
+      status: 200,
+      headers: { 'content-length': String(bytes.byteLength) },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const events: Array<{ received: number; total: number; percent: number }> = []
+    const result = await new AppInfoService().downloadUpdate(
+      { assetUrl: apiAssetUrl, assetName, assetSize: bytes.byteLength },
+      (_channel, progress) => events.push(progress),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(fetchMock).toHaveBeenCalledWith(apiAssetUrl, expect.objectContaining({
+      headers: expect.objectContaining({ accept: 'application/octet-stream' }),
+    }))
     expect(fs.readFileSync(result.data.filePath)).toEqual(Buffer.from(bytes))
     expect(events.at(-1)?.percent).toBe(100)
   })

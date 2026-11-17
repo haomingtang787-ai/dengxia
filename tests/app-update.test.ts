@@ -19,4 +19,18 @@ describe('更新检查', () => {
     expect(picked.assetSize).toBe(139_000_000)
     expect(pickSetupAsset([])).toEqual({ assetUrl: null, assetName: null, assetSize: null })
   })
+
+  it('有 API asset 地址时优先使用它', () => {
+    const picked = pickSetupAsset([
+      {
+        name: 'DengXia-setup-1.0.3.exe',
+        size: 141_900_000,
+        browser_download_url: 'https://github.com/x/setup.exe',
+        url: 'https://api.github.com/repos/haomingtang787-ai/dengxia/releases/assets/123',
+      },
+    ])
+    expect(picked.assetName).toBe('DengXia-setup-1.0.3.exe')
+    expect(picked.assetUrl).toBe('https://api.github.com/repos/haomingtang787-ai/dengxia/releases/assets/123')
+    expect(picked.assetSize).toBe(141_900_000)
+  })
 })
