@@ -191,7 +191,7 @@ export function ReviewView({
   }
 
   return (
-    <article className="sheet teaching">
+    <article className="sheet teaching review-page">
       <header>
         <div>
           <div className="review-heading">

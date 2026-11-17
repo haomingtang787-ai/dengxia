@@ -70,7 +70,57 @@
   margin: 0 auto;
   padding: 32px 34px 56px;
   border-radius: 0;
+  background: #f7f8f4;
+}
+
+/* 复习页沿用课堂页的淡青纸色与深绿主按钮，不再出现独立的白色工作台。 */
+.review-page .primary {
+  background: #20483d;
+}
+
+.review-page .primary:hover {
+  background: #286052;
+}
+
+.review-page .ghost {
+  border-color: #d6e2da;
+  color: #3e554b;
+}
+
+.review-page .ghost:hover {
+  border-color: #20483d;
+}
+
+.review-page .chip {
+  background: #eef4ef;
+  color: #3c5549;
+}
+
+.review-page .meta {
+  color: #6d7b70;
+}
+
+.review-page .link-btn {
+  color: #20483d;
+}
+
+.review-page .review-goal {
   background: #fff;
+  border-color: #e3e9e3;
+}
+
+.review-page .review-card {
+  background: #fff;
+  border-color: #e3e9e3;
+  box-shadow: 0 8px 20px rgba(32, 72, 61, 0.06);
+}
+
+.review-page .card-row {
+  border-color: #e3e9e3;
+}
+
+.review-page .card-row.suspended {
+  background: #f4f7f3;
 }
 
 .review-heading {
