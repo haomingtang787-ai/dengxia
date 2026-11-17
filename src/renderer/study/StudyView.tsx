@@ -73,15 +73,21 @@ function tokenLabel(value: number): string {
   return String(value)
 }
 
-function artifactKindLabel(kind: string): string {
-  const labels: Record<string, string> = {
-    summary: '总结',
-    outline: '大纲',
-    search: '查找',
-    quiz: '题测',
-    teachback: '复述',
-  }
-  return labels[kind] ?? kind
+function timeLabel(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+function pageNumberFromSource(source: string): number | null {
+  const match = source.match(/第\s*(\d+)\s*页/)
+  return match ? Number(match[1]) : null
+}
+
+function stripCoursePrefix(value: string, courseName: string): string {
+  if (!courseName) return value
+  const escaped = courseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return value.replace(new RegExp(`^${escaped}[-—– ]*`), '')
 }
 
 function bboxStyle(bbox: [number, number, number, number]): { left: string; top: string; width: string; height: string } {
@@ -104,11 +110,15 @@ export function StudyView({
   documents,
   selectedVersionId,
   onOpenDocs,
+  onOpenReview,
+  onOpenSettings,
 }: {
   notify: Notify
   documents: DocumentListItem[]
   selectedVersionId: string | null
   onOpenDocs: () => void
+  onOpenReview: () => void
+  onOpenSettings: () => void
 }) {
   const api = window.desk
   const [courses, setCourses] = useState<StudyCourseTree | null>(null)
@@ -127,6 +137,7 @@ export function StudyView({
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
   const [leftOpen, setLeftOpen] = useState(true)
+  const [railQuery, setRailQuery] = useState('')
   const [rightOpen, setRightOpen] = useState(false)
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const [toolFocus, setToolFocus] = useState<StudyToolKind | null>(null)
@@ -260,6 +271,26 @@ export function StudyView({
   const courseItems = courses?.items ?? []
   const activeCourse = courseItems.find((course) => course.courseId === (detail?.courseId ?? activeCourseId)) ?? null
   const courseName = activeCourse?.name ?? detail?.subject ?? '未分类'
+  const visibleCourses = useMemo(() => {
+    const query = railQuery.trim().toLowerCase()
+    if (!query) return courseItems
+    return courseItems
+      .map((course) => {
+        const courseMatches = course.name.toLowerCase().includes(query)
+        return {
+          ...course,
+          sessions: courseMatches
+            ? course.sessions
+            : course.sessions.filter((session) =>
+                session.title.toLowerCase().includes(query)
+                || session.sourceName.toLowerCase().includes(query)
+                || session.units.some((unit) => unit.title.toLowerCase().includes(query)),
+              ),
+        }
+      })
+      .filter((course) => course.name.toLowerCase().includes(query) || course.sessions.length > 0)
+  }, [courseItems, railQuery])
+  const totalMinutes = detail?.units.reduce((sum, unit) => sum + unit.minutes, 0) ?? 0
   const latestAssistantId = useMemo(() => {
     if (!detail) return null
     return [...detail.messages].reverse().find((message) => message.role === 'assistant' && message.citations.length > 0)?.id ?? null
@@ -545,27 +576,39 @@ export function StudyView({
 
   const leftRail = (
     <aside className={`ws-left${leftOpen ? '' : ' collapsed'}`}>
-      <div className="ws-left-head">
-        {leftOpen ? (
-          <>
-            <div>
-              <span className="ws-eyebrow">我的课程</span>
-              <h3>课程</h3>
-            </div>
-            <div className="ws-left-head-actions">
-              <button className="ws-icon" title="新建课程" onClick={() => setCourseDialog({ mode: 'create', name: '' })}>＋</button>
-              <button className="ws-icon" title="收起左栏" onClick={() => setLeftOpen(false)}>‹</button>
-            </div>
-          </>
-        ) : (
-          <button className="ws-icon ws-expand-left" title="展开课程" onClick={() => setLeftOpen(true)}>课程</button>
-        )}
-      </div>
       {leftOpen ? (
         <>
+          <div className="ws-brand">
+            <span className="ws-logo">灯</span>
+            <div className="ws-brand-text">
+              <b>灯下</b>
+              <small>只在这台电脑上的老师</small>
+            </div>
+            <button className="ws-collapse" title="收起左栏" onClick={() => setLeftOpen(false)}>‹</button>
+          </div>
+
+          <div className="ws-rail-actions">
+            <button className="ws-new-course" title="新建课程" onClick={() => setCourseDialog({ mode: 'create', name: '' })}>
+              <span>＋</span> 新建课程
+            </button>
+            <label className="ws-search">
+              <span>⌕</span>
+              <input
+                value={railQuery}
+                placeholder="搜索课程、课件或讲"
+                onChange={(event) => setRailQuery(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div className="ws-tree-label">
+            <span>课程</span>
+            <small>{courseItems.length} 门 · {courseItems.reduce((sum, course) => sum + course.sessions.length, 0)} 份课件</small>
+          </div>
+
           <div className="ws-course-list">
-            {courseItems.map((course) => {
-              const expanded = expandedCourses.has(course.courseId)
+            {visibleCourses.map((course) => {
+              const expanded = expandedCourses.has(course.courseId) || Boolean(railQuery.trim())
               const active = (detail?.courseId ?? activeCourseId) === course.courseId
               return (
                 <div key={course.courseId} className={`ws-course${expanded ? ' open' : ''}${active ? ' active' : ''}`}>
@@ -597,11 +640,10 @@ export function StudyView({
                               onClick={() => void open(session.sessionId)}
                               title={session.sourceName}
                             >
-                              <span className="ws-doc-icon">▤</span>
                               <span className="ws-doc-text">
-                                <b>{session.title}</b>
-                                <small>{session.unitCount} 讲 · {session.status === 'finished' ? '已总结' : '进行中'}</small>
+                                <b>{stripCoursePrefix(session.sourceName || session.title, course.name)}</b>
                               </span>
+                              <span className="ws-doc-count">{session.unitCount} 讲</span>
                             </button>
                             {isActive ? (
                               <div className="ws-doc-units">
@@ -632,15 +674,32 @@ export function StudyView({
                 <p>还没有课程。先建一门课，再从文稿库导入课件。</p>
                 <button className="primary" onClick={() => setCourseDialog({ mode: 'create', name: '' })}>新建课程</button>
               </div>
+            ) : courseItems.length > 0 && visibleCourses.length === 0 ? (
+              <div className="ws-course-empty"><p>没有搜到。换个词，或清空搜索。</p></div>
             ) : null}
           </div>
+
           <footer className="ws-left-foot">
-            <button onClick={onOpenDocs}>文稿库</button>
-            <button onClick={() => setTeacherOpen(true)}>老师档案</button>
-            <button onClick={() => setCourseDialog({ mode: 'create', name: '' })}>新建课程</button>
+            <button onClick={onOpenDocs}>
+              <span>▤</span>
+              <b>文稿库</b>
+              <small>{documents.length} 份</small>
+            </button>
+            <button onClick={onOpenReview}>
+              <span>◫</span>
+              <b>复习</b>
+              <small>到点再练</small>
+            </button>
+            <button onClick={onOpenSettings}>
+              <span>⚙</span>
+              <b>设置</b>
+              <small>模型与本机</small>
+            </button>
           </footer>
         </>
-      ) : null}
+      ) : (
+        <button className="ws-icon ws-expand-left" title="展开课程" onClick={() => setLeftOpen(true)}>课程</button>
+      )}
     </aside>
   )
 
@@ -651,11 +710,12 @@ export function StudyView({
       open={rightOpen}
       onClose={() => setRightOpen(false)}
       onOpenMaterials={(focus) => { setToolFocus(focus); setMaterialsOpen(true) }}
+      onQuick={(text) => { setQuestion(text); questionRef.current?.focus() }}
     />
   ) : null
 
   return (
-    <div className={`ws-study${leftOpen ? '' : ' left-collapsed'}`}>
+    <div className={`ws-study${leftOpen ? '' : ' left-collapsed'}${rightOpen ? ' right-open' : ''}`}>
       {leftRail}
 
       {!detail ? (
@@ -747,20 +807,19 @@ export function StudyView({
               <div className="ws-crumb">
                 <span>{courseName}</span>
                 <span className="ws-slash">/</span>
-                <span>{detail.title}</span>
+                <span>{stripCoursePrefix(detail.sourceName || detail.title, courseName)}</span>
               </div>
               <h2>
-                {activeUnit ? <>第 {activeUnit.ordinal + 1} 讲 · {activeUnit.title}</> : detail.title}
+                {activeUnit ? <>第 {activeUnit.ordinal + 1} 讲 · {activeUnit.title.split(/[：:]/)[0]}</> : detail.title}
                 {activeUnit ? <span className="ws-live-dot">正在讲</span> : null}
               </h2>
-              <p className="quiet">
-                {detail.units.length} 讲 · {detail.checks.length ? `已作答 ${detail.checks.length} 处` : '还没作答'} · {detail.messages.length} 条课堂记录
-                {detail.materialChunks > 1 ? ` · 已分 ${detail.materialChunks} 段读懂` : ''}
+              <p className="ws-head-meta">
+                {detail.units.length} 讲 · 约 {totalMinutes} 分钟 · {pages.length ? `讲义 ${pages.length} 页 · ` : ''}上次更新 {timeLabel(detail.updatedAt)}
               </p>
             </div>
             <div className="ws-head-actions">
               <button className="ghost ws-context-toggle" onClick={() => setRightOpen((open) => !open)}>这一讲</button>
-              <button className="ghost" onClick={() => setMaterialsOpen(true)}>整份课件</button>
+              <button className="ghost ws-materials-btn" onClick={() => setMaterialsOpen(true)}>整份课件</button>
               <div className="study-manage">
                 <button className="ghost" onClick={() => { setMoreOpen((open) => !open); setConfirmAction(null) }}>更多</button>
                 {moreOpen ? (
@@ -800,6 +859,7 @@ export function StudyView({
 
           <div className="ws-stream" ref={streamRef}>
             {detail.messages.length === 0 ? <p className="quiet ws-empty-stream">老师还没开口。</p> : null}
+            <div className="ws-system">开课与总览 · 这份课件已拆成 {detail.units.length} 讲</div>
             {overviewMessages(detail).map((message) => (
               <ChatMessage
                 key={message.id}
@@ -861,26 +921,29 @@ export function StudyView({
 
           <div className="ws-composer">
             <div className="ws-composer-box">
-              <textarea
-                ref={questionRef}
-                value={question}
-                rows={2}
-                placeholder={activeUnit ? `就「${activeUnit.title}」问一句，比如：这一页的公式为什么成立？` : '问老师一句…'}
-                onChange={(event) => setQuestion(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault()
-                    void sendQuestion()
-                  }
-                }}
-              />
+              <div className="ws-composer-input">
+                <button className="ws-plus" title="打开整份课件与资料" onClick={() => setMaterialsOpen(true)}>＋</button>
+                <textarea
+                  ref={questionRef}
+                  value={question}
+                  rows={2}
+                  placeholder={activeUnit ? `问第 ${activeUnit.ordinal + 1} 讲：哪里没听懂，或者要我换一种讲法…` : '问老师一句…'}
+                  onChange={(event) => setQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      void sendQuestion()
+                    }
+                  }}
+                />
+              </div>
               <div className="ws-composer-tools">
                 <div className="ws-mode">
                   <button className={mode === 'direct' ? 'active' : ''} onClick={() => setMode('direct')}>直接讲解</button>
                   <button className={mode === 'guided' ? 'active' : ''} onClick={() => setMode('guided')}>引导我</button>
                 </div>
                 <label className="ws-skill">
-                  <span>技能</span>
+                  <span>技能：</span>
                   <select value={skill} onChange={(event) => setSkill(event.target.value as StudySkill)}>
                     <option value="auto">自动</option>
                     <option value="explain">讲解</option>
@@ -892,19 +955,14 @@ export function StudyView({
                     <option value="teachback">复述</option>
                   </select>
                 </label>
-                <span className="ws-model">{modelName}</span>
+                <span className="ws-model"><i />{modelName || '模型未配置'}</span>
                 <span className="ws-mini-usage">课件 {tokenLabel(usageTotal)}</span>
-                <button className="primary ws-send" onClick={() => void sendQuestion()} disabled={busy !== null || !question.trim()}>
-                  {busy === 'send' ? '回答中…' : '发送'}
+                <button className="ws-send" aria-label="发送" onClick={() => void sendQuestion()} disabled={busy !== null || !question.trim()}>
+                  {busy === 'send' ? '…' : '↑'}
                 </button>
               </div>
-              <div className="ws-quick">
-                <button onClick={() => setQuestion('用三句话总结这一讲，并指到对应讲义页。')}>总结这讲</button>
-                <button onClick={() => setQuestion('就这一页出一道小题考我，先别给答案。')}>考考我</button>
-                <button onClick={() => setQuestion('把这一页的原文和公式逐条讲清楚。')}>讲这一页</button>
-                <span className="quiet">Enter 发送 · Shift+Enter 换行</span>
-              </div>
             </div>
+            <p className="ws-composer-note">Enter 发送 · Shift+Enter 换行 · 回答会对照这一讲的讲义页</p>
           </div>
         </main>
       )}
@@ -982,9 +1040,14 @@ function ChatMessage({
   if (message.role === 'user') {
     return (
       <div className="ws-message user">
-        <div className="ws-bubble">
-          <span className="ws-message-role">你</span>
-          <p><MathText text={message.content} /></p>
+        <div className="ws-message-main">
+          <div className="ws-message-head user">
+            <span>你</span>
+            <span>{timeLabel(message.createdAt)}</span>
+          </div>
+          <div className="ws-bubble">
+            <p><MathText text={message.content} /></p>
+          </div>
         </div>
       </div>
     )
@@ -995,38 +1058,43 @@ function ChatMessage({
   return (
     <div className="ws-message assistant">
       <span className="ws-avatar">师</span>
-      <div className="ws-bubble">
-        <span className="ws-message-role">{teacherName}</span>
-        <p><MathText text={message.content} /></p>
-        {cards.length ? (
-          <div className="ws-cites">
-            {cards.map((citation) => (
-              <CitationCard
-                key={`${message.id}-${citation.pageNumber}-${citation.quote.slice(0, 8)}`}
-                citation={citation}
-                page={pageForCitation(citation, pages)}
-                onOpen={(page) => onOpenPage(citation, page)}
-              />
-            ))}
-            {chips.length ? (
-              <div className="ws-cite-chips">
-                {chips.map((citation) => (
-                  <button key={`${message.id}-chip-${citation.pageNumber}`} onClick={() => onOpenPage(citation, pageForCitation(citation, pages))}>
-                    还有 p.{citation.pageNumber}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : chips.length ? (
-          <div className="ws-cite-chips">
-            {chips.map((citation) => (
-              <button key={`${message.id}-chip-${citation.pageNumber}`} onClick={() => onOpenPage(citation, pageForCitation(citation, pages))}>
-                p.{citation.pageNumber}
-              </button>
-            ))}
-          </div>
-        ) : null}
+      <div className="ws-message-main">
+        <div className="ws-message-head">
+          <b>{teacherName || '老师'}</b>
+          <span>{timeLabel(message.createdAt)}</span>
+        </div>
+        <div className="ws-bubble">
+          <p><MathText text={message.content} /></p>
+          {cards.length ? (
+            <div className="ws-cites">
+              {cards.map((citation) => (
+                <CitationCard
+                  key={`${message.id}-${citation.pageNumber}-${citation.quote.slice(0, 8)}`}
+                  citation={citation}
+                  page={pageForCitation(citation, pages)}
+                  onOpen={(page) => onOpenPage(citation, page)}
+                />
+              ))}
+              {chips.length ? (
+                <div className="ws-cite-chips">
+                  {chips.map((citation) => (
+                    <button key={`${message.id}-chip-${citation.pageNumber}`} onClick={() => onOpenPage(citation, pageForCitation(citation, pages))}>
+                      还有 p.{citation.pageNumber}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : chips.length ? (
+            <div className="ws-cite-chips">
+              {chips.map((citation) => (
+                <button key={`${message.id}-chip-${citation.pageNumber}`} onClick={() => onOpenPage(citation, pageForCitation(citation, pages))}>
+                  p.{citation.pageNumber}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   )
@@ -1059,14 +1127,15 @@ function CitationCard({
       </button>
       <div className="ws-cite-text">
         <div className="ws-cite-label">
-          <span>对照讲义 p.{citation.pageNumber}</span>
-          <button onClick={() => onOpen(page)}>打开</button>
+          <span>对照讲义</span>
+          <b>p.{citation.pageNumber}</b>
+          <button className="ws-cite-open" onClick={() => onOpen(page)}>打开这一页 ↗</button>
         </div>
         <blockquote>{citation.quote}</blockquote>
-        <p className="quiet">
+        <p className="ws-cite-caption">
           {image
-            ? (citation.bbox ? '整页原图，黄色是这一句的位置' : '整页原图；这一句没有可定位的框，直接读原句')
-            : '原句卡：DOCX/TXT 或渲染失败时不伪造截图'}
+            ? (citation.bbox ? '整页图，黄框标出原句位置' : '整页图；这一句无法定位，直接保留原句')
+            : '原句卡：这一页没有页面图'}
         </p>
       </div>
     </article>
@@ -1145,36 +1214,50 @@ function LectureBlock({
 
   return (
     <article className={`ws-lecture${active ? ' active' : ''}`}>
-      {unit.keyPoints.length ? (
-        <div className="ws-keypoints">
-          {unit.keyPoints.map((point) => <span key={point}>{point}</span>)}
-        </div>
-      ) : null}
       <div className="ws-segments">
         {unit.segments.map((segment, index) => {
           const saved = savedFor(index)
+          const page = pageNumberFromSource(segment.source) ?? pageNumberFromSource(unit.source)
           return (
-            <section key={`${unit.id}-${index}`} className="ws-segment">
-              <blockquote>{segment.source}</blockquote>
-              <p><MathText text={segment.explain} /></p>
-              {segment.check ? (
-                <div className="ws-check">
-                  <b>停一下</b>
-                  <span><MathText text={segment.check} /></span>
-                  <textarea
-                    rows={2}
-                    value={drafts[index] ?? saved?.answer ?? ''}
-                    placeholder="用自己的话答一句。写下来，学习总结才有证据判断你掌握到哪里。"
-                    onChange={(event) => setDrafts((current) => ({ ...current, [index]: event.target.value }))}
-                  />
-                  <div className="ws-check-actions">
-                    <button className="ghost" disabled={saving !== null} onClick={() => void submit(index)}>
-                      {saving === index ? '正在记下…' : saved ? '改一下答案' : '记下我的答案'}
-                    </button>
-                    {saved ? <span className="quiet">已记录，会进入学习总结</span> : null}
-                  </div>
+            <section key={`${unit.id}-${index}`} className="ws-segment ws-message assistant ws-lecture-msg">
+              <span className="ws-avatar">师</span>
+              <div className="ws-message-main">
+                <div className="ws-message-head">
+                  <b>老师</b>
+                  <span>{index === 0 ? '这一讲讲稿' : `接着讲 · 第 ${index + 1} 段`}</span>
                 </div>
-              ) : null}
+                <div className="ws-bubble">
+                  <p><MathText text={segment.explain} /></p>
+                  {segment.source ? (
+                    <div className="ws-lecture-cite">
+                      {page ? <span className="ws-page-chip">p.{page}</span> : null}
+                      <span className="ws-lecture-quote">{segment.source}</span>
+                    </div>
+                  ) : null}
+                  {segment.check ? (
+                    <details className="ws-check">
+                      <summary>
+                        <b>停一下</b>
+                        <span><MathText text={segment.check} /></span>
+                      </summary>
+                      <div className="ws-check-body">
+                        <textarea
+                          rows={2}
+                          value={drafts[index] ?? saved?.answer ?? ''}
+                          placeholder="用自己的话答一句。写下来，学习总结才有证据判断你掌握到哪里。"
+                          onChange={(event) => setDrafts((current) => ({ ...current, [index]: event.target.value }))}
+                        />
+                        <div className="ws-check-actions">
+                          <button className="ghost" disabled={saving !== null} onClick={() => void submit(index)}>
+                            {saving === index ? '正在记下…' : saved ? '改一下答案' : '记下我的答案'}
+                          </button>
+                          {saved ? <span className="quiet">已记录，会进入学习总结</span> : null}
+                        </div>
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+              </div>
             </section>
           )
         })}
@@ -1189,72 +1272,130 @@ function ContextRail({
   open,
   onClose,
   onOpenMaterials,
+  onQuick,
 }: {
   detail: StudySessionDetail
   unit: StudyUnit | null
   open: boolean
   onClose: () => void
   onOpenMaterials: (focus: StudyToolKind | null) => void
+  onQuick: (text: string) => void
 }) {
   const artifacts = detail.artifacts
     .filter((artifact) => unit && (artifact.scope === `unit:${unit.ordinal}` || artifact.scope === 'course'))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, 4)
   const note = detail.teacherNote
+  const pointPages = unit?.segments.map((segment) => pageNumberFromSource(segment.source)) ?? []
+  const fallbackPage = unit ? pageNumberFromSource(unit.source) : null
+  const pageNumbers = [...new Set(pointPages.filter((page): page is number => page != null))]
+  const pageRange = pageNumbers.length
+    ? (pageNumbers.length === 1 ? `p.${pageNumbers[0]}` : `p.${Math.min(...pageNumbers)}–p.${Math.max(...pageNumbers)}`)
+    : fallbackPage ? `p.${fallbackPage}` : ''
+  const shortTitle = unit?.title.split(/[：:]/)[0] || detail.title
   return (
     <aside className={`ws-context${open ? ' open' : ''}`}>
       <header className="ws-context-head">
-        <div>
-          <span className="ws-eyebrow">当前这一讲</span>
-          <h3>{unit ? `第 ${unit.ordinal + 1} 讲` : '整份课件'}</h3>
+        <div className="ws-context-kicker">
+          <span>这一讲</span>
+          <span className="ws-pin">只看 · 跟着跳走</span>
+          <button className="icon-btn ws-context-close" title="收起" onClick={onClose}>×</button>
         </div>
-        <button className="icon-btn ws-context-close" title="收起" onClick={onClose}>×</button>
+        <div className="ws-context-title">
+          <span>{unit ? `第 ${unit.ordinal + 1} 讲` : '整份课件'}</span>
+          <h3>{shortTitle}</h3>
+        </div>
+        <p className="ws-context-meta">
+          {unit ? `讲义 ${pageRange || '见讲稿'} · 约 ${unit.minutes} 分钟` : `共 ${detail.units.length} 讲 · 约 ${detail.units.reduce((sum, item) => sum + item.minutes, 0)} 分钟`}
+        </p>
       </header>
 
-      <section className="ws-context-section">
-        <h4>知识点</h4>
-        {unit?.keyPoints.length ? (
-          <div className="ws-points">
-            {unit.keyPoints.map((point) => <span key={point}>{point}</span>)}
+      <div className="ws-context-scroll">
+        <section className="ws-context-section ws-context-card">
+          <div className="ws-card-head">
+            <h4>知识点</h4>
+            <span>{unit?.keyPoints.length ?? 0} 条</span>
           </div>
-        ) : <p className="quiet">这一讲还没有单独列知识点。</p>}
-        {unit ? <p className="ws-context-source">原文从哪里来：{unit.source}</p> : null}
-      </section>
+          {unit?.keyPoints.length ? (
+            <div className="ws-points">
+              {unit.keyPoints.map((point, index) => (
+                <div className="ws-point" key={point}>
+                  <span className="ws-point-n">{String(index + 1).padStart(2, '0')}</span>
+                  <p>{point}</p>
+                  {pointPages[index] || fallbackPage ? <small>p.{pointPages[index] ?? fallbackPage}</small> : null}
+                </div>
+              ))}
+            </div>
+          ) : <p className="quiet">这一讲还没有单独列知识点。</p>}
+        </section>
 
-      <section className="ws-context-section">
-        <h4>老师手记</h4>
-        {note ? (
-          <>
-            <p className="ws-note-text">{note.summary}</p>
-            {note.stuck.length ? <p className="ws-note-stuck">还卡着：{note.stuck.slice(0, 2).join('；')}</p> : null}
-            {note.next.length ? <p className="quiet">下次先做：{note.next.slice(0, 2).join('；')}</p> : null}
-          </>
-        ) : (
-          <p className="quiet">还没有手记。生成学习总结时，老师会一起写下这次课的四段手记。</p>
-        )}
-      </section>
-
-      <section className="ws-context-section">
-        <h4>生成物</h4>
-        {artifacts.length ? (
-          <div className="ws-artifacts">
-            {artifacts.map((artifact) => (
-              <button key={artifact.id} onClick={() => onOpenMaterials(artifact.kind as StudyToolKind)}>
-                <span>{artifact.title}</span>
-                <small>{artifactKindLabel(artifact.kind)} · {artifact.scope === 'course' ? '整份课件' : '这一讲'}</small>
-              </button>
-            ))}
+        <section className="ws-context-section ws-context-card">
+          <div className="ws-card-head">
+            <h4>老师手记</h4>
+            <span>{note ? '已写下' : '空'}</span>
           </div>
-        ) : <p className="quiet">问老师「总结这讲 / 考考我 / 找原文」，生成物会出现在这里。</p>}
+          {note ? (
+            <div className="ws-note-rows">
+              <div className="ws-note-row">
+                <span className="ok">讲通了</span>
+                <p>{note.worked.slice(0, 2).join('；') || note.summary}</p>
+              </div>
+              {note.stuck.length ? (
+                <div className="ws-note-row">
+                  <span className="warn">还卡着</span>
+                  <p>{note.stuck.slice(0, 2).join('；')}</p>
+                </div>
+              ) : null}
+              {note.next.length ? (
+                <div className="ws-note-row">
+                  <span>下次先</span>
+                  <p>{note.next.slice(0, 2).join('；')}</p>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="quiet">还没有手记。生成学习总结时，老师会一起写下这次课的四段手记。</p>
+          )}
+        </section>
+
+        <section className="ws-context-section ws-context-card">
+          <div className="ws-card-head">
+            <h4>这一讲的生成物</h4>
+            <span>{artifacts.length} 份</span>
+          </div>
+          {artifacts.length ? (
+            <div className="ws-artifacts">
+              {artifacts.map((artifact) => (
+                <button className="ws-artifact-chip" key={artifact.id} onClick={() => onOpenMaterials(artifact.kind as StudyToolKind)}>
+                  <span>{artifact.title}</span>
+                  <small className="done">done</small>
+                </button>
+              ))}
+            </div>
+          ) : <p className="quiet">问老师「总结这讲 / 考考我 / 找原文」，生成物会出现在这里。</p>}
+        </section>
+
+        <section className="ws-context-section ws-context-card">
+          <div className="ws-card-head">
+            <h4>这份课件用量</h4>
+            <span>按课件合计</span>
+          </div>
+          <UsageSummary usage={detail.usage} />
+        </section>
+      </div>
+
+      <section className="ws-quick-panel">
+        <div className="ws-quick-label">想让我做点什么？</div>
+        <div className="ws-quick-chips">
+          <button onClick={() => onQuick('用三句话总结这一讲，并指到对应讲义页。')}>总结这一讲</button>
+          <button onClick={() => onQuick(unit ? `把第 ${unit.ordinal + 1} 讲的第 1 页原文和公式逐条讲清楚。` : '把这份课件最容易混的三个点讲清楚。')}>把这一页讲清楚</button>
+          <button onClick={() => onQuick('找原文：把这一讲里最关键的三个句子找出来。')}>找原文</button>
+        </div>
       </section>
 
-      <section className="ws-context-section">
-        <h4>这份课件用量</h4>
-        <UsageSummary usage={detail.usage} />
-      </section>
-
-      <footer className="ws-context-foot">
-        <button className="ghost" onClick={() => onOpenMaterials(null)}>打开整份课件资料</button>
+      <footer className="ws-context-brand">
+        <b>灯下 · 本地优先</b>
+        <span>没有账号，没有云同步</span>
       </footer>
     </aside>
   )
@@ -1263,17 +1404,17 @@ function ContextRail({
 function UsageSummary({ usage }: { usage: StudyUsage }) {
   if (usage.calls === 0) return <p className="quiet">还没开始用模型。</p>
   const hit = usage.promptTokens > 0 ? Math.round((usage.cachedTokens / usage.promptTokens) * 100) : 0
+  const missed = Math.max(0, usage.promptTokens - usage.cachedTokens)
   return (
     <div className="ws-usage-summary">
-      <div className="ws-usage-grid">
-        <div><b>{usage.calls}</b><span>次调用</span></div>
-        <div><b>{tokenLabel(usage.promptTokens)}</b><span>输入</span></div>
-        <div><b>{tokenLabel(usage.completionTokens)}</b><span>输出</span></div>
-        <div><b>{hit}%</b><span>缓存命中</span></div>
+      <div className="ws-usage-line"><span>调用</span><b>{usage.calls} 次</b></div>
+      <div className="ws-usage-line"><span>输入</span><b>{tokenLabel(usage.promptTokens)}</b><small>命中 {tokenLabel(usage.cachedTokens)} / 未命中 {tokenLabel(missed)}</small></div>
+      <div className="ws-usage-line"><span>输出</span><b>{tokenLabel(usage.completionTokens)}</b><small>含推理 token</small></div>
+      <div className="ws-usage-bar"><i style={{ width: `${Math.min(100, Math.max(0, hit))}%` }} /></div>
+      <div className="ws-usage-foot">
+        <span>缓存命中 {hit}%</span>
+        <span>{usage.estimatedCalls > 0 ? `${usage.estimatedCalls} 次未回 usage` : '供应商已回传 usage'}</span>
       </div>
-      <p className="quiet">
-        整份课件合计，不按讲拆。{usage.estimatedCalls > 0 ? `有 ${usage.estimatedCalls} 次没回 usage，按 0 估算。` : '供应商已回传 usage。'}
-      </p>
     </div>
   )
 }

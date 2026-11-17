@@ -353,6 +353,18 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 700))
     return
   }
+  if (action === 'workspace-top') {
+    await new Promise((resolve) => setTimeout(resolve, 1600))
+    return
+  }
+  if (action === 'workspace-card') {
+    await new Promise((resolve) => setTimeout(resolve, 1600))
+    await win.webContents.executeJavaScript(
+      `(() => { const cite = document.querySelector('.ws-cite'); cite?.scrollIntoView({ block: 'center' }); return true })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
   if (action === 'workspace-cites') {
     await new Promise((resolve) => setTimeout(resolve, 700))
     console.log('[smoke] 打开老师页', await click('老师'))
@@ -443,7 +455,7 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 1200))
     const before = await win.webContents.executeJavaScript(`document.querySelectorAll('.ws-course').length`)
     const opened = await win.webContents.executeJavaScript(
-      `(() => { const b = document.querySelector('.ws-icon[title="新建课程"]'); b?.click(); return Boolean(b); })()`,
+      `(() => { const b = document.querySelector('.ws-new-course'); b?.click(); return Boolean(b); })()`,
     )
     await new Promise((resolve) => setTimeout(resolve, 400))
     const typed = await win.webContents.executeJavaScript(
@@ -500,7 +512,7 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
       })()`,
     )
     const collapsed = await win.webContents.executeJavaScript(
-      `(() => { const b = document.querySelector('.ws-icon[title="收起左栏"]'); b?.click(); return Boolean(b); })()`,
+      `(() => { const b = document.querySelector('.ws-collapse'); b?.click(); return Boolean(b); })()`,
     )
     await new Promise((resolve) => setTimeout(resolve, 300))
     const left = await win.webContents.executeJavaScript(
@@ -529,7 +541,9 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
       })()`,
     )
     await new Promise((resolve) => setTimeout(resolve, 300))
-    console.log('[smoke] 发送问题', await click('发送'), typed)
+    console.log('[smoke] 发送问题', await win.webContents.executeJavaScript(
+      `(() => { const b = document.querySelector('.ws-send'); b?.click(); return Boolean(b); })()`,
+    ), typed)
     await new Promise((resolve) => setTimeout(resolve, 28000))
     const state = await win.webContents.executeJavaScript(
       `(() => {

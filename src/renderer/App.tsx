@@ -97,8 +97,9 @@ export function App() {
   const [view, setView] = useState<'doc' | 'study' | 'review'>(() => {
     const requested = new URLSearchParams(location.search).get('view')
     if (requested === 'review') return 'review'
+    if (requested === 'doc') return 'doc'
     if (requested === 'study' || requested === 'class') return 'study'
-    return 'doc'
+    return 'study'
   })
   const showNotice = useCallback((tone: 'info' | 'bad', text: string) => setNotice({ tone, text }), [])
   const [aiOpen, setAiOpen] = useState(false)
@@ -863,7 +864,7 @@ export function App() {
   }
 
   return (
-    <div className="app">
+    <div className={`app${view === 'study' ? ' teacher-app' : ''}`}>
       <div className="top-stack">
         <header className="top">
           <div className="brand">
@@ -1043,7 +1044,7 @@ export function App() {
         </aside>
         <section className="panel stage">
           <div className="body">
-            {view === 'study' ? <StudyView notify={showNotice} documents={docs} selectedVersionId={selected} onOpenDocs={() => setView('doc')} /> : null}
+            {view === 'study' ? <StudyView notify={showNotice} documents={docs} selectedVersionId={selected} onOpenDocs={() => setView('doc')} onOpenReview={() => setView('review')} onOpenSettings={() => void openAi()} /> : null}
             {view === 'review' ? <ReviewView notify={showNotice} onExportCards={() => void exportCards()} onExportMisses={() => void exportMisses()} /> : null}
             {view === 'doc' ? (
               <>
