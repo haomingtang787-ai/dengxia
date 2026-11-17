@@ -333,7 +333,14 @@ export class StudyService {
             checks,
           })
           const noteRaw = await client.complete(notePrompt.system, notePrompt.user, 2_000, 'disabled', 'teacher-note')
-          this.options.teacher.saveNote(sessionId, parseTeacherNote(noteRaw))
+          const note = parseTeacherNote(noteRaw)
+          this.options.teacher.saveNote(sessionId, note)
+          // 手记里的观察先落成“待确认记忆”；失败只警告，不能把手记或总结退回去。
+          try {
+            this.options.teacher.saveObservations(sessionId, session.document_version_id, note.memories)
+          } catch (error) {
+            console.warn('[teacher-memory]', error)
+          }
         } catch (error) {
           console.warn('[teacher-note]', error)
         }

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createHarness, type Harness } from './helpers/app'
 import { Store } from '../src/storage/store'
 import { TeachingService } from '../src/teaching/service'
+import { TeacherService } from '../src/teaching/teacherService'
 import { AppDatabase } from '../src/storage/database'
 import { migrate } from '../src/storage/migrate'
 import { SettingsStore } from '../src/providers/settings'
@@ -174,6 +175,42 @@ describe('0.6.0 新功能', () => {
     source.db.run(
       `INSERT INTO documents(id, display_name, created_at) VALUES ('doc-from-backup', '备份里的文稿.pdf', '2026-11-16T10:00:00.000Z')`,
     )
+    source.db.run(
+      `INSERT INTO document_versions(id, document_id, sha256, format, size_bytes, original_relpath, status, parser_version, created_at)
+       VALUES ('version-from-backup', 'doc-from-backup', ?, 'pdf', 4, 'originals/backup.pdf', 'ready', 'test', '2026-11-16T10:00:00.000Z')`,
+      'd'.repeat(64),
+    )
+    source.db.run(
+      `INSERT INTO study_sessions(
+        id, request_id, document_version_id, title, subject, source_name, overview, outline_json,
+        habits_json, warnings_json, truncated, material_chars, material_chunks, status, summary_json,
+        teacher_snapshot_json, created_at, updated_at
+      ) VALUES ('session-from-backup', ?, 'version-from-backup', '备份课堂', '测试', '备份里的文稿.pdf', '总览', '[]',
+        '{}', '[]', 0, 10, 1, 'ready', '', '', '2026-11-16T10:00:00.000Z', '2026-11-16T10:00:00.000Z')`,
+      randomUUID(),
+    )
+    const sourceTeacher = new TeacherService({ db: source.db, now: () => Date.parse('2026-11-16T10:00:00.000Z') })
+    sourceTeacher.savePersona({ name: '备份老师', pronoun: 'she', tone: 'warm-rigorous', boundaries: [] })
+    sourceTeacher.saveProfile({
+      goal: '备份目标', level: '备份水平', subjects: ['测试'], weeklyMinutes: 300, notes: '备份备注',
+    })
+    sourceTeacher.memorySave({
+      kind: 'preference',
+      subject: '测试',
+      concept: '',
+      statement: '这条记忆要跟着备份一起回来。',
+      evidence: '备份测试',
+      confidence: 0.9,
+      sourceSessionId: 'session-from-backup',
+      sourceDocumentVersionId: 'version-from-backup',
+      userConfirmed: true,
+    })
+    sourceTeacher.saveNote('session-from-backup', {
+      summary: '备份里的老师手记。',
+      worked: ['备份成功'],
+      stuck: [],
+      next: ['恢复后继续上课'],
+    })
     const backupPath = path.join(tempRoot(), 'backup')
     await source.service.writeBackup(backupPath)
 
@@ -208,6 +245,15 @@ describe('0.6.0 新功能', () => {
     try {
       expect(restored.get<{ n: number }>('SELECT COUNT(*) AS n FROM documents')?.n).toBe(1)
       expect(restored.get<{ id: string }>("SELECT id FROM documents WHERE id = 'doc-from-backup'")?.id).toBe('doc-from-backup')
+      const restoredTeacher = new TeacherService({ db: restored })
+      const overview = restoredTeacher.overview()
+      expect(overview.ok).toBe(true)
+      if (overview.ok) {
+        expect(overview.data.persona.name).toBe('备份老师')
+        expect(overview.data.profile.goal).toBe('备份目标')
+        expect(overview.data.memories.some((item) => item.statement.includes('跟着备份'))).toBe(true)
+      }
+      expect(restoredTeacher.noteForSession('session-from-backup')?.summary).toBe('备份里的老师手记。')
     } finally {
       restored.close()
     }

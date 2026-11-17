@@ -58,6 +58,8 @@ export function TeacherProfile({
   const [concept, setConcept] = useState('')
   const [statement, setStatement] = useState('')
   const [confirmMemory, setConfirmMemory] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingText, setEditingText] = useState('')
   const [confirmReset, setConfirmReset] = useState(false)
 
   async function refresh() {
@@ -144,8 +146,40 @@ export function TeacherProfile({
     const result = await api.teacher.deleteMemory({ id })
     if (!result.ok) { notify('bad', result.error.message); return }
     setConfirmMemory(null)
+    if (editingId === id) setEditingId(null)
     await refresh()
     notify('info', '这条记忆已删除。')
+  }
+
+  async function confirmObservation(memory: TeacherMemory) {
+    if (!api) return
+    const result = await api.teacher.saveMemory({
+      ...memory,
+      statement: memory.statement,
+      userConfirmed: true,
+    })
+    if (!result.ok) { notify('bad', result.error.message); return }
+    await refresh()
+    notify('info', '已确认，这条记忆会直接进入下一次课的提示词。')
+  }
+
+  async function saveMemoryEdit(memory: TeacherMemory) {
+    if (!api) return
+    const next = editingText.trim()
+    if (!next) {
+      notify('bad', '记忆内容不能为空。')
+      return
+    }
+    const result = await api.teacher.saveMemory({
+      ...memory,
+      statement: next,
+      userConfirmed: memory.userConfirmed,
+    })
+    if (!result.ok) { notify('bad', result.error.message); return }
+    setEditingId(null)
+    setEditingText('')
+    await refresh()
+    notify('info', '这条记忆已改写。')
   }
 
   async function reset() {
@@ -264,6 +298,19 @@ export function TeacherProfile({
                       key={memory.id}
                       memory={memory}
                       confirm={confirmMemory === memory.id}
+                      editing={editingId === memory.id}
+                      editText={editingText}
+                      onEditChange={setEditingText}
+                      onStartEdit={() => {
+                        setEditingId(memory.id)
+                        setEditingText(memory.statement)
+                      }}
+                      onCancelEdit={() => {
+                        setEditingId(null)
+                        setEditingText('')
+                      }}
+                      onSaveEdit={() => void saveMemoryEdit(memory)}
+                      onConfirm={() => void confirmObservation(memory)}
                       onDelete={() => void removeMemory(memory.id)}
                     />
                   ))}
@@ -290,10 +337,24 @@ export function TeacherProfile({
 function MemoryRow({
   memory,
   confirm,
+  editing,
+  editText,
+  onEditChange,
+  onStartEdit,
+  onCancelEdit,
+  onSaveEdit,
+  onConfirm,
   onDelete,
 }: {
   memory: TeacherMemory
   confirm: boolean
+  editing: boolean
+  editText: string
+  onEditChange: (value: string) => void
+  onStartEdit: () => void
+  onCancelEdit: () => void
+  onSaveEdit: () => void
+  onConfirm: () => void
   onDelete: () => void
 }) {
   const status = memory.userConfirmed ? '已确认' : '观察'
@@ -302,11 +363,27 @@ function MemoryRow({
       <div className="teacher-memory-head">
         <span className={`chip ${memory.userConfirmed ? 'confirmed' : ''}`}>{KIND_LABEL[memory.kind]} · {status}</span>
         <span className="quiet">{memory.subject || '全局'} · 置信度 {Math.round(memory.confidence * 100)}%</span>
-        <button className="icon-btn danger-text" title="删除这条记忆" onClick={onDelete}>
-          {confirm ? '确认删除' : '×'}
-        </button>
+        <div className="teacher-memory-actions">
+          {!memory.userConfirmed ? (
+            <button className="ghost teacher-memory-confirm" onClick={onConfirm}>确认</button>
+          ) : null}
+          <button className="ghost" onClick={onStartEdit}>改写</button>
+          <button className="icon-btn danger-text" title="删除这条记忆" onClick={onDelete}>
+            {confirm ? '确认删除' : '×'}
+          </button>
+        </div>
       </div>
-      <p>{memory.statement}</p>
+      {editing ? (
+        <div className="teacher-memory-edit">
+          <textarea rows={2} maxLength={400} value={editText} onChange={(event) => onEditChange(event.target.value)} />
+          <div className="teacher-memory-actions">
+            <button className="primary" onClick={onSaveEdit} disabled={!editText.trim()}>保存</button>
+            <button className="ghost" onClick={onCancelEdit}>取消</button>
+          </div>
+        </div>
+      ) : (
+        <p>{memory.statement}</p>
+      )}
       {memory.evidence ? <small className="quiet">依据：{memory.evidence}</small> : null}
     </div>
   )

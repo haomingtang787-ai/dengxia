@@ -9,6 +9,7 @@ import type {
   TeacherMemoryInput,
   TeacherMemoryKind,
   TeacherNote,
+  TeacherObservation,
   TeacherOverview,
   TeacherPersona,
   TeacherPersonaInput,
@@ -122,6 +123,26 @@ function memoryInput(body: unknown): TeacherMemoryInput {
   }
 }
 
+function noteInput(body: unknown): {
+  sessionId: string
+  summary: string
+  worked: string[]
+  stuck: string[]
+  next: string[]
+} {
+  if (!isPlainObject(body)) throw new ArgumentError('老师手记参数必须是对象。')
+  if (!isUuid(body.sessionId)) throw new ArgumentError('课堂标识无效。')
+  const summary = text(body.summary, 1200, '手记总览')
+  if (!summary) throw new ArgumentError('手记总览不能为空。')
+  return {
+    sessionId: body.sessionId,
+    summary,
+    worked: stringList(body.worked, 5, 400, '讲通的内容'),
+    stuck: stringList(body.stuck, 5, 400, '卡住的内容'),
+    next: stringList(body.next, 5, 400, '下次先做什么'),
+  }
+}
+
 /** 老师档案/记忆的服务层：只做主进程数据读写，不直接调用模型。 */
 export class TeacherService {
   private readonly store: TeacherStore
@@ -195,6 +216,42 @@ export class TeacherService {
     }
   }
 
+  /**
+   * 下课时把老师手记里的候选观察写入记忆。观察默认未确认；
+   * 同一 kind+subject+concept 不新增重复条，已由学生确认的旧条不会被观察覆盖。
+   */
+  saveObservations(
+    sessionId: string | null,
+    documentVersionId: string | null,
+    observations: TeacherObservation[],
+  ): TeacherMemory[] {
+    const saved: TeacherMemory[] = []
+    const existing = this.store.listMemories()
+    for (const observation of observations.slice(0, 2)) {
+      const confirmed = existing.find((item) =>
+        item.userConfirmed &&
+        item.kind === observation.kind &&
+        item.subject === observation.subject &&
+        item.concept === observation.concept,
+      )
+      if (confirmed) continue
+      const result = this.memorySave({
+        ...observation,
+        evidence: '下课时老师手记里的观察',
+        confidence: 0.6,
+        sourceSessionId: sessionId,
+        sourceDocumentVersionId: documentVersionId,
+        userConfirmed: false,
+        status: 'active',
+      })
+      if (result.ok) {
+        saved.push(result.data)
+        existing.push(result.data)
+      }
+    }
+    return saved
+  }
+
   reset(): Result<TeacherOverview> {
     const id = requestId()
     try {
@@ -225,6 +282,27 @@ export class TeacherService {
 
   noteForSession(sessionId: string): TeacherNote | null {
     return this.store.note(sessionId)
+  }
+
+  noteSave(body: unknown): Result<TeacherNote> {
+    const id = requestId()
+    try {
+      const input = noteInput(body)
+      const note = this.store.saveNote({ ...input, createdAt: this.at() }, this.at())
+      return ok(id, note)
+    } catch (error) {
+      return fail(id, error instanceof ArgumentError ? 'INVALID_ARGUMENT' : 'STORAGE_ERROR', error instanceof Error ? error.message : '保存老师手记失败。')
+    }
+  }
+
+  noteDelete(body: unknown): Result<{ deleted: boolean }> {
+    const id = requestId()
+    try {
+      if (!isPlainObject(body) || !isUuid(body.sessionId)) throw new ArgumentError('课堂标识无效。')
+      return ok(id, { deleted: this.store.deleteNote(body.sessionId) })
+    } catch (error) {
+      return fail(id, error instanceof ArgumentError ? 'INVALID_ARGUMENT' : 'STORAGE_ERROR', error instanceof Error ? error.message : '删除老师手记失败。')
+    }
   }
 
   noteGet(body: unknown): Result<TeacherNote | null> {

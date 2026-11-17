@@ -184,6 +184,10 @@ const desk = {
     notes: () => invoke<{ items: import('../shared/teacher').TeacherNote[] }>(IpcChannel.teacherNoteList, {}),
     note: (body: { sessionId: string }) =>
       invoke<import('../shared/teacher').TeacherNote | null>(IpcChannel.teacherNoteGet, body),
+    saveNote: (body: { sessionId: string; summary: string; worked: string[]; stuck: string[]; next: string[] }) =>
+      invoke<import('../shared/teacher').TeacherNote>(IpcChannel.teacherNoteSave, body),
+    deleteNote: (body: { sessionId: string }) =>
+      invoke<{ deleted: boolean }>(IpcChannel.teacherNoteDelete, body),
   },
   preview: {
     onFocus: (callback: (focus: PreviewFocus) => void) => {

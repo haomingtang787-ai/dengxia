@@ -378,4 +378,11 @@ export class TeacherStore {
   notes(): TeacherNote[] {
     return this.db.all<TeacherNoteRow>('SELECT * FROM teacher_notes ORDER BY created_at DESC').map(noteOf)
   }
+
+  deleteNote(sessionId: string): boolean {
+    const row = this.db.get<TeacherNoteRow>('SELECT * FROM teacher_notes WHERE session_id = ?', sessionId)
+    if (!row) return false
+    this.db.run('DELETE FROM teacher_notes WHERE session_id = ?', sessionId)
+    return true
+  }
 }

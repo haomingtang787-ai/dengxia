@@ -79,6 +79,14 @@ export type TeacherMemoryInput = {
   status?: 'active' | 'archived'
 }
 
+/** 下课时从老师手记里提炼出的候选观察，必须由学生确认后才算“记住”。 */
+export type TeacherObservation = {
+  kind: TeacherMemoryKind
+  subject: string
+  concept: string
+  statement: string
+}
+
 export type TeacherPersonaInput = {
   name: string
   pronoun?: TeacherPronoun

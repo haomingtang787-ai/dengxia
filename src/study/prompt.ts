@@ -45,10 +45,12 @@ const NOTE_SYSTEM = [
   '你是学生的老师。下课时，你要写一份只属于这次课堂的老师手记，留给下一次的自己看。',
   '只依据本次课堂的讲解、学生作答和对话，不要编造学生没有表现出来的掌握情况。',
   '只输出一个 JSON 对象，不要 markdown 代码块，不要解释。',
-  '字段：summary, worked[], stuck[], next[]。',
+  '字段：summary, worked[], stuck[], next[], memories[]。',
   'summary 用 80 到 160 字说明这次课到底学到了哪里。',
   'worked 写这次真正讲通、学生能复述的内容；stuck 写仍然卡住、含糊或答错的地方；next 写下一次课最该先做什么。',
   '每个数组 1 到 5 条，每条一句话，具体到知识点或动作。',
+  'memories 是留给下一次课的两条以内长期观察，每条对象为 {kind, subject, concept, statement}；kind 只能是 goal/mastery/misconception/preference/strategy/constraint。',
+  'memories 只写这次课堂有证据、下次能改变教法的观察；没有证据就输出空数组，不要写“基础不错/需要努力”这类泛泛评价。',
 ].join('\n')
 
 /** 老师人格与档案的简短注入，控制在 400 字以内。 */
@@ -213,6 +215,7 @@ export function buildTeacherNotePrompt(input: {
     answers ? `学生这次的实际作答：\n${answers}` : '学生这次没有留下作答。没有作答证据的内容不要写成已掌握。',
     `这次课堂对话：\n${transcript || '学生这次没有提问。'}`,
     '请写下一次课真正用得上的四段式老师手记。',
+    '如果这次课有值得长期记住的具体观察，请在 memories 里最多写 2 条；没有就留空数组。',
   ].join('\n\n')
   return { system: NOTE_SYSTEM, user }
 }

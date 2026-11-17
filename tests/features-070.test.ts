@@ -184,7 +184,7 @@ describe('0.7.0 老师地基', () => {
     expect(kept?.sourceDocumentVersionId).toBe(versionId)
   })
 
-  it('下课手记提示词只要求四段 JSON，解析缺失字段时给空数组', () => {
+  it('下课手记提示词要求四段加观察，解析缺失字段时给空数组', () => {
     const prompt = buildTeacherNotePrompt({
       teacherName: '周老师',
       title: '光合作用',
@@ -194,12 +194,118 @@ describe('0.7.0 老师地基', () => {
       checks: [{ unitOrdinal: 0, segmentIndex: 0, question: '场所？', answer: '叶绿体', createdAt: 'x' }],
     })
     expect(prompt.system).toContain('老师手记')
+    expect(prompt.system).toContain('memories')
     expect(prompt.user).toContain('叶绿体')
+    expect(prompt.user).toContain('memories')
 
     const parsed = parseTeacherNote(JSON.stringify({ summary: '这次学到场所。' }))
     expect(parsed.summary).toBe('这次学到场所。')
     expect(parsed.worked).toEqual([])
     expect(parsed.stuck).toEqual([])
     expect(parsed.next).toEqual([])
+    expect(parsed.memories).toEqual([])
+  })
+
+  it('手记解析最多保留两条观察记忆，类型不合法的不入库', () => {
+    const parsed = parseTeacherNote(JSON.stringify({
+      summary: '这次学到场所和反应式。',
+      worked: [],
+      stuck: ['反应式还没配平'],
+      next: [],
+      memories: [
+        { kind: 'misconception', subject: '生物', concept: '场所', statement: '容易把场所记反。' },
+        { kind: 'preference', subject: '生物', concept: '', statement: '更喜欢先看例子。' },
+        { kind: 'mastery', subject: '生物', concept: '反应式', statement: '这条不该被保留。' },
+      ],
+    }))
+    expect(parsed.memories).toHaveLength(2)
+    expect(parsed.memories[0]).toMatchObject({ kind: 'misconception', subject: '生物', concept: '场所' })
+  })
+
+  it('下课时写入观察记忆：最多两条、去重、不降级已确认记忆', () => {
+    const observations = [
+      { kind: 'misconception' as const, subject: '线代', concept: '特征值', statement: '容易把特征值和特征向量说反。' },
+      { kind: 'preference' as const, subject: '线代', concept: '', statement: '更喜欢先看具体例子。' },
+      { kind: 'mastery' as const, subject: '线代', concept: '正交', statement: '第三条不该写入。' },
+    ]
+    const saved = teacher.saveObservations(null, null, observations)
+    expect(saved).toHaveLength(2)
+    expect(saved.every((item) => item.userConfirmed === false)).toBe(true)
+    expect(saved.every((item) => item.status === 'active')).toBe(true)
+
+    const repeated = teacher.saveObservations(null, null, [observations[0]])
+    const afterRepeat = teacher.memoryList()
+    expect(afterRepeat.ok).toBe(true)
+    if (!afterRepeat.ok) return
+    expect(afterRepeat.data.items).toHaveLength(2)
+    expect(repeated[0].id).toBe(saved[0].id)
+
+    const target = afterRepeat.data.items.find((item) => item.id === saved[0].id)!
+    const confirmed = teacher.memorySave({
+      ...target,
+      statement: '确认后的说法：先分清数配向量。',
+      userConfirmed: true,
+    })
+    expect(confirmed.ok).toBe(true)
+    if (!confirmed.ok) return
+    expect(confirmed.data.userConfirmed).toBe(true)
+
+    teacher.saveObservations(null, null, [{ ...observations[0], statement: '新的观察，不该覆盖确认。' }])
+    const afterConfirmed = teacher.memoryList()
+    expect(afterConfirmed.ok).toBe(true)
+    if (!afterConfirmed.ok) return
+    const kept = afterConfirmed.data.items.find((item) => item.id === target.id)
+    expect(kept?.userConfirmed).toBe(true)
+    expect(kept?.statement).toBe('确认后的说法：先分清数配向量。')
+  })
+
+  it('老师手记可更新、可删除', () => {
+    const fixture = sessionFixture()
+    teacher.saveNote(fixture.sessionId, {
+      summary: '初版手记。',
+      worked: ['讲通了场所'],
+      stuck: [],
+      next: ['下次配平'],
+    })
+    const updated = teacher.noteSave({
+      sessionId: fixture.sessionId,
+      summary: '改后的手记。',
+      worked: ['讲通了场所', '会自己举例'],
+      stuck: ['反应式仍没配平'],
+      next: ['先做一道配平题'],
+    })
+    expect(updated.ok).toBe(true)
+    if (!updated.ok) return
+    expect(updated.data.summary).toBe('改后的手记。')
+    expect(updated.data.worked).toHaveLength(2)
+    expect(teacher.noteForSession(fixture.sessionId)?.summary).toBe('改后的手记。')
+
+    const removed = teacher.noteDelete({ sessionId: fixture.sessionId })
+    expect(removed.ok).toBe(true)
+    if (!removed.ok) return
+    expect(removed.data.deleted).toBe(true)
+    expect(teacher.noteForSession(fixture.sessionId)).toBeNull()
   })
 })
+
+function sessionFixture(): { sessionId: string; versionId: string } {
+  const docId = randomUUID()
+  const versionId = randomUUID()
+  const sessionId = randomUUID()
+  db.run('INSERT INTO documents(id, display_name, created_at) VALUES (?, ?, ?)', docId, '手记编辑测试.pdf', '2026-11-17T10:00:00.000Z')
+  db.run(
+    `INSERT INTO document_versions(id, document_id, sha256, format, size_bytes, original_relpath, status, parser_version, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    versionId, docId, 'c'.repeat(64), 'pdf', 4, 'originals/c.pdf', 'ready', 'test', '2026-11-17T10:00:00.000Z',
+  )
+  db.run(
+    `INSERT INTO study_sessions(
+      id, request_id, document_version_id, title, subject, source_name, overview, outline_json,
+      habits_json, warnings_json, truncated, material_chars, material_chunks, status, summary_json,
+      teacher_snapshot_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sessionId, randomUUID(), versionId, '手记编辑测试', '测试', '手记编辑测试.pdf', '总览', '[]',
+    '{}', '[]', 0, 10, 1, 'ready', '', '', '2026-11-17T10:00:00.000Z', '2026-11-17T10:00:00.000Z',
+  )
+  return { sessionId, versionId }
+}

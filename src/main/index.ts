@@ -241,9 +241,70 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     console.log('[smoke] 图片阅读', action, '字数', text.length, '内容', text.slice(0, 90).replace(/\n/g, ' / '))
     return
   }
+  if (action === 'course-materials') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开课程资料', await click('课程资料'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const materials = await win.webContents.executeJavaScript(
+      `(() => {
+        const drawer = document.querySelector('.course-materials');
+        if (!drawer) return '';
+        drawer.scrollTop = 0;
+        return drawer.innerText;
+      })()`,
+    )
+    console.log('[smoke] 课程资料', materials.slice(0, 400).replace(/\n/g, ' / '))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
+  if (action === 'teacher-note-edit') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await click('课程资料')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log('[smoke] 打开手记编辑', await click('编辑'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const editor = await win.webContents.executeJavaScript(
+      `(() => { const e = document.querySelector('.teacher-note-editor'); return e ? e.innerText : '' })()`,
+    )
+    console.log('[smoke] 手记编辑器', editor.slice(0, 200).replace(/\n/g, ' / '))
+    return
+  }
+  if (action === 'teacher-note-save') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await click('课程资料')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await click('编辑')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const filled = await win.webContents.executeJavaScript(
+      `(() => {
+        const area = document.querySelector('.teacher-note-editor textarea');
+        if (!area) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setter?.call(area, '这堂课把内积和正交讲通了；Phase 2 已通过界面保存手记。');
+        area.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`,
+    )
+    console.log('[smoke] 填写手记总览', filled)
+    console.log('[smoke] 保存手记', await click('保存'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const saved = await win.webContents.executeJavaScript(
+      `(() => { const n = document.querySelector('.study-teacher-note'); return n ? n.innerText : '' })()`,
+    )
+    console.log('[smoke] 保存后的手记', saved.slice(0, 220).replace(/\n/g, ' / '))
+    return
+  }
   if (action === 'teacher-note') {
     await new Promise((resolve) => setTimeout(resolve, 700))
     await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await click('课程资料')
     await new Promise((resolve) => setTimeout(resolve, 700))
     const note = await win.webContents.executeJavaScript(
       `(() => { const n = document.querySelector('.study-teacher-note'); if (!n) return ''; n.scrollIntoView({ block: 'center' }); return n.innerText })()`,
@@ -256,6 +317,52 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 700))
     console.log('[smoke] 打开老师页', await click('老师'))
     await new Promise((resolve) => setTimeout(resolve, 700))
+    return
+  }
+  if (action === 'teacher-more') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log('[smoke] 打开更多菜单', await click('更多'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const menu = await win.webContents.executeJavaScript(
+      `(() => { const m = document.querySelector('.study-manage-menu'); return m ? m.innerText : '' })()`,
+    )
+    console.log('[smoke] 更多菜单', menu.replace(/\n/g, ' / '))
+    return
+  }
+  if (action === 'teacher-chat') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log('[smoke] 点击问老师', await click('问老师'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const state = await win.webContents.executeJavaScript(
+      `(() => {
+        const chat = document.querySelector('.study-chat');
+        const area = document.querySelector('.study-composer textarea');
+        return {
+          open: Boolean(chat?.classList.contains('open')),
+          focused: Boolean(area && document.activeElement === area),
+        };
+      })()`,
+    )
+    console.log('[smoke] 问老师后', JSON.stringify(state))
+    return
+  }
+  if (action === 'teacher-path') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log('[smoke] 点击路径答一下', await clickContains('答“停一下”'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const state = await win.webContents.executeJavaScript(
+      `(() => {
+        const area = document.activeElement;
+        return { tag: area?.tagName ?? '', className: area?.className ?? '' };
+      })()`,
+    )
+    console.log('[smoke] 路径答一下后', JSON.stringify(state))
     return
   }
   if (action === 'teacher-save') {

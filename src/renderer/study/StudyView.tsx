@@ -71,11 +71,11 @@ export function StudyView({
   const [loading, setLoading] = useState(true)
   // 对话默认收起，把高度让给讲解正文；点标题栏再展开。窄窗里由右下角按钮展开抽屉。
   const [chatOpen, setChatOpen] = useState(false)
-  // 侧边栏可收放：大纲、总览/总结都能收起，把宽度让给讲解正文。
+  // 侧边栏可收放：大纲能收起，把宽度让给讲解正文；课程资料收进抽屉，不再常驻右栏。
   const [outlineOpen, setOutlineOpen] = useState(true)
-  const [sideOpen, setSideOpen] = useState(true)
-  // 「管理」菜单：清对话 / 清总结 / 删课程，二次点击确认。
-  const [manageOpen, setManageOpen] = useState(false)
+  const [materialsOpen, setMaterialsOpen] = useState(false)
+  // 「更多」菜单：老师档案、文稿库、再开一门和清理动作都收在这里，顶部只留主路径。
+  const [moreOpen, setMoreOpen] = useState(false)
   const [teacherOpen, setTeacherOpen] = useState(false)
   const [teacherName, setTeacherName] = useState('老师')
   const [confirmAction, setConfirmAction] = useState<'chat' | 'summary' | 'delete' | null>(null)
@@ -84,6 +84,29 @@ export function StudyView({
   const sheetScrollRef = useRef<HTMLDivElement | null>(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
   const outlineRef = useRef<HTMLDivElement | null>(null)
+  const questionRef = useRef<HTMLTextAreaElement | null>(null)
+
+  function focusChat() {
+    setChatOpen(true)
+    window.setTimeout(() => questionRef.current?.focus(), 80)
+  }
+
+  function focusOutline() {
+    setOutlineOpen(true)
+    window.setTimeout(() => {
+      outlineRef.current?.querySelector<HTMLButtonElement>('.study-unit.active')?.focus()
+    }, 60)
+  }
+
+  function focusCheck() {
+    const input = sheetScrollRef.current?.querySelector<HTMLTextAreaElement>('.study-check textarea')
+    if (!input) {
+      sheetScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+      return
+    }
+    input.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    window.setTimeout(() => input.focus(), 300)
+  }
 
   // 新消息进来时贴到底部，老师回复完也滚一下，不用每次手动找。
   const messageCount = detail?.messages.length ?? 0
@@ -269,7 +292,7 @@ export function StudyView({
     const result = await api.study.clearChat({ sessionId: detail.sessionId })
     if (!result.ok) { notify('bad', result.error.message); return }
     setDetail(result.data)
-    setManageOpen(false)
+    setMoreOpen(false)
     setConfirmAction(null)
     notify('info', '对话记录已清除。')
   }
@@ -279,7 +302,7 @@ export function StudyView({
     const result = await api.study.clearSummary({ sessionId: detail.sessionId })
     if (!result.ok) { notify('bad', result.error.message); return }
     setDetail(result.data)
-    setManageOpen(false)
+    setMoreOpen(false)
     setConfirmAction(null)
     notify('info', '学习总结已清除，可以重新生成。')
   }
@@ -291,7 +314,8 @@ export function StudyView({
     if (!result.ok) { notify('bad', result.error.message); return }
     setDetail(null)
     setUnitId(null)
-    setManageOpen(false)
+    setMoreOpen(false)
+    setMaterialsOpen(false)
     setConfirmAction(null)
     autoStarted.current = docId
     setSessions(result.data.items)
@@ -317,29 +341,47 @@ export function StudyView({
           </p>
         </div>
         <div className="row study-actions">
-          <button className="ghost" onClick={() => setTeacherOpen(true)}>老师档案</button>
-          <button className="ghost" onClick={onOpenDocs}>文稿库</button>
           {detail ? (
-            <div className="study-manage">
-              <button className="ghost" onClick={() => { setManageOpen((open) => !open); setConfirmAction(null) }}>管理</button>
-              {manageOpen ? (
-                <div className="study-manage-menu">
-                  <button onClick={() => (confirmAction === 'chat' ? void clearChat() : setConfirmAction('chat'))}>
-                    {confirmAction === 'chat' ? '再点一次，清除全部对话' : '清除对话记录'}
-                  </button>
-                  <button onClick={() => (confirmAction === 'summary' ? void clearSummary() : setConfirmAction('summary'))}>
-                    {confirmAction === 'summary' ? '再点一次，清除总结' : '清除学习总结'}
-                  </button>
-                  <button className="danger-text" onClick={() => (confirmAction === 'delete' ? void deleteCourse() : setConfirmAction('delete'))}>
-                    {confirmAction === 'delete' ? '再点一次，删除这门课' : '删除这门课'}
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <button className="primary" onClick={() => void createCourse()} disabled={busy !== null || !selectedDoc}>
-            {busy === 'create' ? '正在完整读懂并拆课…' : detail ? '用当前文稿再开一门' : '完整读懂并拆课'}
-          </button>
+            <>
+              <button className="ghost" onClick={() => setMaterialsOpen(true)}>课程资料</button>
+              <div className="study-manage">
+                <button className="ghost" onClick={() => { setMoreOpen((open) => !open); setConfirmAction(null) }}>更多</button>
+                {moreOpen ? (
+                  <div className="study-manage-menu">
+                    <p className="study-menu-label">这门课</p>
+                    <button onClick={() => { setMoreOpen(false); setTeacherOpen(true) }}>老师档案</button>
+                    <button onClick={() => { setMoreOpen(false); onOpenDocs() }}>回到文稿库</button>
+                    <button disabled={busy !== null || !selectedDoc} onClick={() => { setMoreOpen(false); void createCourse() }}>
+                      用当前文稿再开一门
+                    </button>
+                    <div className="study-menu-divider" />
+                    <p className="study-menu-label">收尾与整理</p>
+                    <button onClick={() => { setMoreOpen(false); setMaterialsOpen(true) }}>
+                      学习总结与老师手记
+                    </button>
+                    <button onClick={() => (confirmAction === 'chat' ? void clearChat() : setConfirmAction('chat'))}>
+                      {confirmAction === 'chat' ? '再点一次，清除全部对话' : '清除对话记录'}
+                    </button>
+                    <button onClick={() => (confirmAction === 'summary' ? void clearSummary() : setConfirmAction('summary'))}>
+                      {confirmAction === 'summary' ? '再点一次，清除总结' : '清除学习总结'}
+                    </button>
+                    <button className="danger-text" onClick={() => (confirmAction === 'delete' ? void deleteCourse() : setConfirmAction('delete'))}>
+                      {confirmAction === 'delete' ? '再点一次，删除这门课' : '删除这门课'}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              <button className="primary" onClick={focusChat}>{chatOpen ? '继续问老师' : '问老师'}</button>
+            </>
+          ) : (
+            <>
+              <button className="ghost" onClick={() => setTeacherOpen(true)}>老师档案</button>
+              <button className="ghost" onClick={onOpenDocs}>文稿库</button>
+              <button className="primary" onClick={() => void createCourse()} disabled={busy !== null || !selectedDoc}>
+                {busy === 'create' ? '正在完整读懂并拆课…' : '完整读懂并拆课'}
+              </button>
+            </>
+          )}
         </div>
       </header>
 
@@ -349,6 +391,37 @@ export function StudyView({
           <span className="pulse-dot" />
           <p>{progressText(progress)}</p>
         </div>
+      ) : null}
+
+      {detail ? (
+        <section className="study-path" aria-label="这一讲的学习路径">
+          <div className="study-path-head">
+            <div>
+              <h3>这一讲怎么学</h3>
+              <p>不用先摸索，按四步走；卡住随时问老师。</p>
+            </div>
+            <div className="study-path-meta">
+              <span className="study-path-current">
+                当前 第 {(activeUnit?.ordinal ?? 0) + 1} 讲{activeUnit ? ` · ${minutesLabel(activeUnit.minutes)}` : ''}
+              </span>
+              <button className="study-path-finish" onClick={() => setMaterialsOpen(true)}>学完这讲，去生成总结</button>
+            </div>
+          </div>
+          <div className="study-path-steps">
+            <button type="button" onClick={focusOutline}>
+              <b>1</b><span>选一讲<small>左边点一讲，绿色是当前</small></span>
+            </button>
+            <button type="button" onClick={() => sheetScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}>
+              <b>2</b><span>读讲稿<small>先看原文，再看讲解</small></span>
+            </button>
+            <button type="button" onClick={focusCheck}>
+              <b>3</b><span>答“停一下”<small>写一句，总结才有证据</small></span>
+            </button>
+            <button type="button" onClick={focusChat}>
+              <b>4</b><span>问老师<small>不懂就追问这一讲</small></span>
+            </button>
+          </div>
+        </section>
       ) : null}
 
       {!detail ? (
@@ -405,7 +478,7 @@ export function StudyView({
           </aside>
         </div>
       ) : (
-        <div className={`study-room${outlineOpen ? '' : ' outline-collapsed'}${sideOpen ? '' : ' side-collapsed'}`}>
+        <div className={`study-room${outlineOpen ? '' : ' outline-collapsed'}`}>
           <aside className={`study-outline${outlineOpen ? '' : ' collapsed'}`} ref={outlineRef}>
             {outlineOpen ? (
               <>
@@ -424,8 +497,14 @@ export function StudyView({
                     <button className="icon-btn" title="收起大纲" onClick={() => setOutlineOpen(false)}>‹</button>
                   </div>
                 </div>
+                <p className="study-outline-hint">点一讲切换；绿色是正在学。</p>
                 {detail.units.map((unit) => (
-                  <button key={unit.id} className={`study-unit ${activeUnit?.id === unit.id ? 'active' : ''}`} onClick={() => setUnitId(unit.id)}>
+                  <button
+                    key={unit.id}
+                    className={`study-unit ${activeUnit?.id === unit.id ? 'active' : ''}`}
+                    aria-current={activeUnit?.id === unit.id ? 'true' : undefined}
+                    onClick={() => setUnitId(unit.id)}
+                  >
                     <b>{String(unit.ordinal + 1).padStart(2, '0')}</b>
                     <span>{unit.title}<small>{unit.source} · {minutesLabel(unit.minutes)}</small></span>
                   </button>
@@ -457,10 +536,10 @@ export function StudyView({
             <section className={`study-chat${chatOpen ? ' open' : ''}`} aria-live="polite">
               <div className="study-chat-head" role="button" tabIndex={0} onClick={() => setChatOpen((open) => !open)}>
                 <div>
-                  <h3>课堂对话{chatOpen ? '' : ` · ${detail.messages.length}`}</h3>
-                  <p className="quiet">问不懂、问为什么、让老师换个说法都行。每次追问都会带上这门课和本讲上下文。</p>
+                  <h3>问老师{chatOpen ? '' : detail.messages.length ? ` · ${detail.messages.length} 条记录` : ''}</h3>
+                  <p className="quiet">不懂就问；老师会结合这一讲和整门课回答。</p>
                 </div>
-                <span className="study-chat-head-toggle quiet">{chatOpen ? '收起 ▾' : '展开 ▴'}</span>
+                <span className="study-chat-head-toggle quiet">{chatOpen ? '收起 ▾' : '展开对话 ▴'}</span>
               </div>
               {chatOpen ? (
                 <>
@@ -475,6 +554,7 @@ export function StudyView({
                   </div>
                   <div className="study-composer">
                     <textarea
+                      ref={questionRef}
                       value={question}
                       placeholder={activeUnit ? `就「${activeUnit.title}」问一句，比如：为什么这一步不能反过来？` : '问老师一句…'}
                       rows={3}
@@ -495,52 +575,105 @@ export function StudyView({
             </section>
           </main>
 
-          <aside className={`study-side${sideOpen ? '' : ' collapsed'}`}>
-            {sideOpen ? (
-              <>
-                <div className="study-side-bar">
-                  <span className="quiet">总览与总结</span>
-                  <button className="icon-btn" title="收起总览" onClick={() => setSideOpen(false)}>›</button>
-                </div>
-                <section className="study-overview">
-                  <h3>整份材料总览</h3>
-                  <p>{detail.overview}</p>
-                  <div className="study-habit-stamp">
-                    <span className="chip">本次习惯</span>
-                    <p>{detail.habits.pace === 'slow' ? '讲透' : detail.habits.pace === 'exam' ? '抓考点' : '适中'} · {detail.habits.style === 'define' ? '先定义' : detail.habits.style === 'ask' ? '先提问' : '先比方'} · {detail.habits.minutes} 分钟</p>
-                  </div>
-                </section>
-                <UsageCard usage={detail.usage} />
-                <section className="study-summary">
-                  <div className="study-outline-title">
-                    <h3>学习分析总结</h3>
-                    {detail.summary ? <span className="chip">已生成</span> : null}
-                  </div>
-                  {detail.summary ? (
-                    <SummaryView detail={detail} />
-                  ) : (
-                    <>
-                      <p className="quiet">上完几讲、追问几轮后，再让 AI 根据这次课堂记录写掌握、薄弱、易错和下一步。</p>
-                      <button className="primary" onClick={() => void finishCourse()} disabled={busy !== null}>
-                        {busy === 'finish' ? '正在分析这次学习…' : '生成学习分析总结'}
-                      </button>
-                    </>
-                  )}
-                </section>
-                {detail.teacherNote ? <TeacherNoteCard note={detail.teacherNote} /> : null}
-              </>
-            ) : (
-              <button className="study-expand" title="展开总览与总结" onClick={() => setSideOpen(true)}>
-                摘要<small>{detail.summary ? '已生成' : '未生成'}</small>
-              </button>
-            )}
-          </aside>
-          <button className="study-chat-toggle" onClick={() => setChatOpen((open) => !open)}>
-            课堂对话 · {detail.messages.length}
+          <button className="study-chat-toggle" onClick={() => { if (chatOpen) setChatOpen(false); else focusChat() }}>
+            {chatOpen ? '收起对话 ▾' : `问老师${detail.messages.length ? ` · ${detail.messages.length} 条记录` : ''}`}
           </button>
         </div>
       )}
+      {detail ? (
+        <CourseMaterials
+          open={materialsOpen}
+          onClose={() => setMaterialsOpen(false)}
+          detail={detail}
+          busy={busy}
+          notify={notify}
+          onFinish={() => void finishCourse()}
+          onNoteChange={(note) => setDetail((current) => current ? { ...current, teacherNote: note } : current)}
+        />
+      ) : null}
       <TeacherProfile open={teacherOpen} onClose={() => setTeacherOpen(false)} notify={notify} onPersonaSaved={setTeacherName} />
+    </div>
+  )
+}
+
+/** 课程资料抽屉：总览、学习总结、老师手记和 API 用量都收在这里，主区只留讲解。 */
+function CourseMaterials({
+  open,
+  onClose,
+  detail,
+  busy,
+  notify,
+  onFinish,
+  onNoteChange,
+}: {
+  open: boolean
+  onClose: () => void
+  detail: StudySessionDetail
+  busy: Busy
+  notify: Notify
+  onFinish: () => void
+  onNoteChange: (note: StudySessionDetail['teacherNote']) => void
+}) {
+  if (!open) return null
+  return (
+    <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <div className="modal course-materials">
+        <header>
+          <div>
+            <h2>课程资料</h2>
+            <p className="quiet">这门课的材料总览、学习分析、老师手记和 API 用量，都放在这里。</p>
+          </div>
+          <button className="icon-btn" title="关闭" onClick={onClose}>×</button>
+        </header>
+
+        <div className="course-materials-body">
+          <div className="course-materials-column">
+            <section className="study-overview">
+              <div className="study-outline-title">
+                <h3>整份材料总览</h3>
+                <span className="chip">开课时读懂</span>
+              </div>
+              <p>{detail.overview}</p>
+              <div className="study-habit-stamp">
+                <span className="chip">本次习惯</span>
+                <p>{detail.habits.pace === 'slow' ? '讲透' : detail.habits.pace === 'exam' ? '抓考点' : '适中'} · {detail.habits.style === 'define' ? '先定义' : detail.habits.style === 'ask' ? '先提问' : '先比方'} · {detail.habits.minutes} 分钟</p>
+              </div>
+            </section>
+
+            <section className="study-summary">
+              <div className="study-outline-title">
+                <h3>学习分析总结</h3>
+                {detail.summary ? <span className="chip">已生成</span> : null}
+              </div>
+              {detail.summary ? (
+                <SummaryView detail={detail} />
+              ) : (
+                <>
+                  <p className="quiet">上完几讲、追问几轮后，再让 AI 根据这次课堂记录写掌握、薄弱、易错和下一步。</p>
+                  <button className="primary" onClick={onFinish} disabled={busy !== null}>
+                    {busy === 'finish' ? '正在分析这次学习…' : '生成学习分析总结'}
+                  </button>
+                </>
+              )}
+            </section>
+          </div>
+
+          <div className="course-materials-column">
+            {detail.teacherNote ? (
+              <TeacherNoteCard note={detail.teacherNote} notify={notify} onChange={onNoteChange} />
+            ) : (
+              <section className="study-teacher-note">
+                <div className="study-outline-title">
+                  <h3>老师手记</h3>
+                  <span className="chip">下课写下</span>
+                </div>
+                <p className="quiet">还没有手记。生成学习分析总结时，老师会一起写下这次课的四段手记。</p>
+              </section>
+            )}
+            <UsageCard usage={detail.usage} />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -581,6 +714,7 @@ function UnitSheet({
         <span className="study-unit-index">第 {unit.ordinal + 1} 讲</span>
         <h3>{unit.title}</h3>
         <p className="quiet">{unit.source} · {minutesLabel(unit.minutes)}</p>
+        <p className="study-sheet-guide">读法：先看原文 → 再看讲解 → 遇到“停一下”写一句；不懂就点“问老师”。</p>
       </header>
       {unit.keyPoints.length ? (
         <div className="study-keypoints">
@@ -624,17 +758,119 @@ function UnitSheet({
   )
 }
 
-function TeacherNoteCard({ note }: { note: NonNullable<StudySessionDetail['teacherNote']> }) {
+function linesOf(text: string): string[] {
+  return text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 5)
+}
+
+function TeacherNoteCard({
+  note,
+  notify,
+  onChange,
+}: {
+  note: NonNullable<StudySessionDetail['teacherNote']>
+  notify: Notify
+  onChange: (note: StudySessionDetail['teacherNote']) => void
+}) {
+  const api = window.desk
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [summary, setSummary] = useState(note.summary)
+  const [worked, setWorked] = useState(note.worked.join('\n'))
+  const [stuck, setStuck] = useState(note.stuck.join('\n'))
+  const [next, setNext] = useState(note.next.join('\n'))
+
+  useEffect(() => {
+    if (editing) return
+    setSummary(note.summary)
+    setWorked(note.worked.join('\n'))
+    setStuck(note.stuck.join('\n'))
+    setNext(note.next.join('\n'))
+  }, [note, editing])
+
+  async function save() {
+    if (!api) return
+    if (!summary.trim()) {
+      notify('bad', '老师手记的总览不能为空。')
+      return
+    }
+    setSaving(true)
+    const result = await api.teacher.saveNote({
+      sessionId: note.sessionId,
+      summary: summary.trim(),
+      worked: linesOf(worked),
+      stuck: linesOf(stuck),
+      next: linesOf(next),
+    })
+    setSaving(false)
+    if (!result.ok) { notify('bad', result.error.message); return }
+    onChange(result.data)
+    setEditing(false)
+    notify('info', '老师手记已更新，下一次课会用新的版本。')
+  }
+
+  async function remove() {
+    if (!api) return
+    if (!confirmDelete) {
+      setConfirmDelete(true)
+      return
+    }
+    const result = await api.teacher.deleteNote({ sessionId: note.sessionId })
+    if (!result.ok) { notify('bad', result.error.message); return }
+    onChange(null)
+    notify('info', '老师手记已删除。学习总结不受影响。')
+  }
+
   return (
     <section className="study-teacher-note">
       <div className="study-outline-title">
         <h3>老师手记</h3>
-        <span className="chip">下课写下</span>
+        {editing ? null : <span className="chip">下课写下</span>}
+        <div className="teacher-note-actions">
+          {editing ? (
+            <>
+              <button className="ghost" onClick={() => void save()} disabled={saving || !summary.trim()}>
+                {saving ? '保存中…' : '保存'}
+              </button>
+              <button className="ghost" onClick={() => setEditing(false)} disabled={saving}>取消</button>
+            </>
+          ) : (
+            <>
+              <button className="ghost" onClick={() => setEditing(true)}>编辑</button>
+              <button className="ghost danger-text" onClick={() => void remove()}>
+                {confirmDelete ? '再点一次删除' : '删除'}
+              </button>
+            </>
+          )}
+        </div>
       </div>
-      <p>{note.summary}</p>
-      {note.worked.length ? <SummaryGroup title="这次讲通了" items={note.worked} /> : null}
-      {note.stuck.length ? <SummaryGroup title="还卡着" items={note.stuck} /> : null}
-      {note.next.length ? <SummaryGroup title="下次先做" items={note.next} /> : null}
+      {editing ? (
+        <div className="teacher-note-editor">
+          <label className="study-field">
+            <span>总览</span>
+            <textarea rows={3} maxLength={1200} value={summary} onChange={(event) => setSummary(event.target.value)} />
+          </label>
+          <label className="study-field">
+            <span>这次讲通了（一行一条）</span>
+            <textarea rows={2} value={worked} onChange={(event) => setWorked(event.target.value)} />
+          </label>
+          <label className="study-field">
+            <span>还卡着（一行一条）</span>
+            <textarea rows={2} value={stuck} onChange={(event) => setStuck(event.target.value)} />
+          </label>
+          <label className="study-field">
+            <span>下次先做（一行一条）</span>
+            <textarea rows={2} value={next} onChange={(event) => setNext(event.target.value)} />
+          </label>
+        </div>
+      ) : (
+        <>
+          <p>{note.summary}</p>
+          {note.worked.length ? <SummaryGroup title="这次讲通了" items={note.worked} /> : null}
+          {note.stuck.length ? <SummaryGroup title="还卡着" items={note.stuck} /> : null}
+          {note.next.length ? <SummaryGroup title="下次先做" items={note.next} /> : null}
+        </>
+      )}
     </section>
   )
 }

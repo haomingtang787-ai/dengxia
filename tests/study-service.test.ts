@@ -81,6 +81,9 @@ const NOTE = {
   worked: ['叶绿体是光合作用的场所'],
   stuck: ['反应式还不完整'],
   next: ['下次先补 O2 与配平'],
+  memories: [
+    { kind: 'strategy', subject: '生物', concept: '反应式', statement: '先看一个配平例子，再让学生自己配。' },
+  ],
 }
 
 function configuredService(fetchImpl: typeof fetch, habits = {
@@ -275,6 +278,21 @@ describe('AI 私教学习会话', () => {
     const noteCall = JSON.parse(String((fetchImpl.mock.calls.at(-1)?.[1] as RequestInit).body))
     expect(noteCall.messages[0].content).toContain('老师手记')
     expect(noteCall.messages[1].content).toContain('光合作用')
+    const overview = teacher.overview()
+    expect(overview.ok).toBe(true)
+    if (overview.ok) {
+      const observation = overview.data.memories.find((item) => item.concept === '反应式')
+      expect(observation?.userConfirmed).toBe(false)
+      expect(observation?.statement).toContain('配平')
+      const source = observation
+        ? db.get<{ source_session_id: string | null; source_document_version_id: string | null }>(
+          'SELECT source_session_id, source_document_version_id FROM teacher_memory WHERE id = ?',
+          observation.id,
+        )
+        : null
+      expect(source?.source_session_id).toBe(sessionId)
+      expect(source?.source_document_version_id).toBe(VERSION_ID)
+    }
     const snapshot = db.get<{ teacher_snapshot_json: string }>(
       'SELECT teacher_snapshot_json FROM study_sessions WHERE id = ?',
       sessionId,

@@ -508,6 +508,42 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-actions { flex-wrap: wrap; justify-content: flex-end; }
 .study-progress { display: flex; gap: 10px; align-items: center; border: 1px solid #cfe6df; background: #f2fbf8; color: #254f47; border-radius: 12px; padding: 10px 14px; }
 .study-progress p { margin: 0; font-size: 13px; }
+/* 有课程时先给一条可点的学习路径：选讲 -> 读讲稿 -> 答停一下 -> 问老师。 */
+.study-path {
+  border: 1px solid #dce9e4; border-radius: 14px; padding: 10px 14px 12px;
+  background: linear-gradient(180deg, #f8fdfb, #fff);
+  display: flex; flex-direction: column; gap: 9px; flex: 0 0 auto;
+}
+.study-path-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.study-path-head h3 { margin: 0; font-size: 15px; }
+.study-path-head p { margin: 2px 0 0; font-size: 12px; color: #5f726b; }
+.study-path-meta { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+.study-path-current {
+  white-space: nowrap; font-size: 12px; font-weight: 600; color: #1f7f6a;
+  background: #eaf7f2; border: 1px solid #cfe8df; border-radius: 999px; padding: 4px 9px;
+}
+.study-path-finish {
+  border: 0; background: transparent; padding: 4px 0; font: inherit; font-size: 12px;
+  font-weight: 600; color: #1f7f6a; cursor: pointer; white-space: nowrap;
+}
+.study-path-finish:hover { text-decoration: underline; }
+.study-path-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.study-path-steps button {
+  min-width: 0; text-align: left; display: flex; align-items: center; gap: 7px;
+  border: 1px solid #e3ebe7; background: #fff; border-radius: 9px;
+  padding: 7px 9px; font: inherit; color: #243247; cursor: pointer;
+}
+.study-path-steps button:hover { border-color: #b9d9ce; background: #f7fcfa; }
+.study-path-steps b {
+  flex: 0 0 auto; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: #eaf7f2; color: #1f7f6a; font-size: 11px; line-height: 1;
+}
+.study-path-steps span { display: flex; flex-direction: column; min-width: 0; font-size: 12px; font-weight: 600; }
+.study-path-steps small {
+  margin-top: 1px; font-size: 11px; font-weight: 400; color: #7a8983;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.study-outline-hint { margin: -2px 0 2px; font-size: 11px; color: #7a8983; line-height: 1.4; }
 .pulse-dot { width: 9px; height: 9px; border-radius: 50%; background: #1f9d80; box-shadow: 0 0 0 5px rgba(31, 157, 128, 0.14); animation: pulse 1.4s infinite; flex: 0 0 auto; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 3px rgba(31,157,128,.16); } 70% { box-shadow: 0 0 0 10px rgba(31,157,128,0); } 100% { box-shadow: 0 0 0 3px rgba(31,157,128,0); } }
 .study-intro { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
@@ -524,34 +560,58 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-habits .quiet { margin: 0; }
 .study-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #5c6b7f; }
 .study-field input, .study-field select { border: 1px solid #dfe5e2; border-radius: 9px; padding: 7px 9px; background: #fff; color: #243247; }
-.study-room { display: grid; grid-template-columns: 230px minmax(0, 1fr) 290px; gap: 12px; align-items: start; min-height: 0; }
-.study-outline, .study-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.study-room { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; align-items: start; min-height: 0; }
+.study-outline { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 
-/* 有课程时整间课堂填满窗口，三栏各自滚动：大纲、讲稿、总览互不抢滚动条。 */
+/* 有课程时整间课堂填满窗口，两栏各自滚动：大纲、讲稿互不抢滚动条。 */
 .study.has-course { flex: 1; min-height: 0; overflow: hidden; gap: 8px; }
 .study.has-course .study-head { flex: 0 0 auto; }
 .study.has-course .study-head h2 { font-size: 19px; margin: 2px 0; }
-.study.has-course .study-room { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
-.study.has-course .study-outline,
-.study.has-course .study-side { overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.study.has-course .study-room { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; position: relative; }
+.study.has-course .study-outline { overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
 .study.has-course .study-main { overflow: hidden; }
 .study-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
-.study.has-course .study-chat { flex: 0 0 auto; min-height: 0; height: auto; }
+/* 对话是随叫随到的抽屉，不占用讲稿高度；收起时只留右下角一枚入口。 */
+.study.has-course .study-chat {
+  display: none;
+  position: absolute;
+  right: 12px;
+  bottom: 54px;
+  width: min(460px, calc(100% - 24px));
+  height: min(74%, 480px);
+  min-height: 0;
+  z-index: 8;
+  box-shadow: 0 18px 48px rgba(24, 40, 36, 0.18);
+}
+.study.has-course .study-chat.open { display: flex; }
 /* 有课程时对话区要留给消息本身，这句说明只在首次建课时出现。 */
 .study.has-course .study-chat-head p { display: none; }
 .study.has-course .study-chat-head { padding: 10px 14px 8px; }
 .study.has-course .study-messages { flex: 1; min-height: 0; max-height: none; }
-/* 全屏/宽屏下对话可收起：收起只剩一条标题栏，讲稿独占整列高度。 */
+/* 展开时消息自己滚动，输入框固定在抽屉底部。 */
 .study-chat-head { cursor: pointer; user-select: none; }
 .study-chat-head-toggle { white-space: nowrap; color: #1f7f6a; font-weight: 600; }
-.study.has-course .study-chat.open .study-messages { max-height: 340px; overflow-y: auto; }
+.study.has-course .study-chat.open .study-messages { max-height: none; overflow-y: auto; }
+.study-chat-toggle {
+  display: inline-flex;
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 7;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #cfe0da;
+  background: #173e3a;
+  color: #f4fffb;
+  border-radius: 999px;
+  padding: 9px 16px;
+  font-size: 13px;
+  box-shadow: 0 8px 20px rgba(23, 62, 58, 0.18);
+}
 
-/* 侧边栏可收放：大纲、总览/总结都能折成一条细边，把宽度让给讲解正文。 */
-.study-room.outline-collapsed { grid-template-columns: 44px minmax(0, 1fr) 290px; }
-.study-room.side-collapsed { grid-template-columns: 230px minmax(0, 1fr) 44px; }
-.study-room.outline-collapsed.side-collapsed { grid-template-columns: 44px minmax(0, 1fr) 44px; }
-.study-outline.collapsed, .study-side.collapsed { gap: 8px; }
-.study-side-bar { display: flex; align-items: center; justify-content: space-between; }
+/* 侧边栏可收放：大纲能折成一条细边，把宽度让给讲解正文。 */
+.study-room.outline-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
+.study-outline.collapsed { gap: 8px; }
 .icon-btn {
   width: 22px; height: 22px; padding: 0; flex: 0 0 auto;
   display: inline-flex; align-items: center; justify-content: center;
@@ -568,7 +628,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 }
 .study-expand small { font-size: 10px; color: #7a8983; font-weight: 400; }
 .study-outline-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.study-outline-title h3, .study-side h3, .study-chat-head h3 { margin: 0; font-size: 15px; }
+.study-outline-title h3, .study-chat-head h3 { margin: 0; font-size: 15px; }
 .study-unit { border: 1px solid #e4e9e6; background: #fff; border-radius: 12px; padding: 9px 10px; display: flex; gap: 8px; text-align: left; align-items: flex-start; }
 .study-unit:hover { border-color: #b9d9ce; }
 .study-unit.active { border-color: #1f9d80; background: #f1fbf7; }
@@ -582,6 +642,11 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-unit-sheet { border: 1px solid #dfe8e4; border-radius: 16px; padding: 20px 24px; background: #fff; }
 .study-unit-sheet header h3 { margin: 4px 0 2px; font-size: 22px; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; }
 .study-unit-index { color: #1f7f6a; font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.study-sheet-guide {
+  margin: 8px 0 0; padding: 6px 9px; border-left: 2px solid #b9d9ce;
+  border-radius: 0 6px 6px 0; background: #f4f8f6;
+  font-size: 12px; line-height: 1.5; color: #5f726b;
+}
 .study-keypoints { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
 .study-keypoints .chip { background: #f1fbf7; border-color: #cfe8df; color: #225e50; }
 .study-segments { display: flex; flex-direction: column; gap: 12px; }
@@ -597,7 +662,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-chat { border: 1px solid #e4e9e6; border-radius: 16px; background: #fff; display: flex; flex-direction: column; min-height: 320px; }
 .study-chat-head { padding: 14px 16px 8px; border-bottom: 1px solid #f0f3f1; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .study-chat-head > div { min-width: 0; }
-.study-chat-close, .study-chat-toggle { display: none; }
+.study-chat-close { display: none; }
 .study-chat-close { white-space: nowrap; align-self: flex-start; }
 .study-chat-head p { margin: 4px 0 0; }
 .study-messages { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
@@ -613,7 +678,7 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-composer textarea { width: 100%; resize: vertical; min-height: 56px; border: 1px solid #dfe5e2; border-radius: 11px; padding: 8px 11px; font: inherit; color: inherit; background: #fbfcfb; }
 .study-composer textarea:focus { outline: none; border-color: #1f9d80; box-shadow: 0 0 0 3px rgba(31,157,128,.12); }
 .study-composer-side { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
-.study-side .study-overview, .study-side .study-summary { border: 1px solid #e4e9e6; border-radius: 16px; padding: 14px; background: #fff; }
+.course-materials .study-overview, .course-materials .study-summary { border: 1px solid #e4e9e6; border-radius: 16px; padding: 14px; background: #fff; }
 .study-manage { position: relative; }
 .study-manage-menu {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
@@ -626,6 +691,9 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
   padding: 8px 10px; font: inherit; color: #243247; cursor: pointer;
 }
 .study-manage-menu button:hover { background: #f3f6f5; }
+.study-manage-menu button:disabled { opacity: .5; cursor: not-allowed; background: transparent; }
+.study-menu-label { margin: 3px 6px 2px; font-size: 11px; color: #7a8983; }
+.study-menu-divider { border-top: 1px dashed #e4e9e6; margin: 4px 2px; }
 .study-manage-menu .danger-text { color: #b4433a; }
 .study-manage-menu .danger-text:hover { background: #fdf1f0; }
 .study-usage { border: 1px solid #e4e9e6; border-radius: 16px; padding: 12px 14px; background: #fff; }
@@ -642,14 +710,11 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-summary-group h4 { margin: 0 0 4px; font-size: 13px; color: #1f7f6a; }
 .study-summary-group ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
 .study-summary-group li { font-size: 12px; color: #3d5049; line-height: 1.55; }
-/* 讲课正文是主阅读区。1300 左右的窗口还挤三栏时，每行只剩十几个字，
-   逐句讲解根本读不下去；这个宽度以下把总览与总结移到正文下方。 */
+/* 讲课正文是主阅读区。1300 左右的窗口还挤两栏时，每行只剩十几个字，
+   逐句讲解根本读不下去；这个宽度以下把大纲压窄，总览与总结收进抽屉。 */
 @media (max-width: 1440px) {
   .study-room { grid-template-columns: 200px minmax(0, 1fr); }
-  .study-side { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; align-items: start; }
-  /* 窄窗时总览/总结是正文下方的一条信息带：固定高度、自己滚动，不能按内容撑高把讲稿挤成 0。 */
-  .study.has-course .study-room { position: relative; grid-template-rows: minmax(0, 1fr) clamp(96px, 14vh, 168px); }
-  .study.has-course .study-side { max-height: none; overflow-y: auto; align-content: start; }
+  .study.has-course .study-room { position: relative; }
   /* 阅读讲稿时把对话收进右下角抽屉，讲稿独占整列高度；需要追问时一键展开。 */
   .study.has-course .study-main { overflow: hidden; }
   .study.has-course .study-chat {
@@ -680,22 +745,22 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
     font-size: 13px;
     box-shadow: 0 8px 20px rgba(23, 62, 58, 0.18);
   }
-  /* 窄窗下收起侧边栏：大纲折成 44px 细边；底部信息带折成 44px 高的一条。 */
+  /* 窄窗下收起大纲：折成 44px 细边。 */
   .study.has-course .study-room.outline-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
-  .study.has-course .study-room.side-collapsed { grid-template-rows: minmax(0, 1fr) 44px; }
-  .study.has-course .study-side.collapsed { display: flex; align-items: stretch; }
-  .study.has-course .study-side.collapsed .study-expand {
-    writing-mode: horizontal-tb; flex-direction: row; min-height: 0; width: 100%; padding: 4px 12px;
-  }
 }
 @media (max-width: 900px) {
   .study-intro, .study-room { grid-template-columns: 1fr; }
-  .study-side { grid-template-columns: 1fr; }
   .study-steps { grid-template-columns: 1fr; }
-  /* 极小窗口先保证能读能问：总览与总结藏起来，对话抽屉占满宽度。 */
+  .study-path-head { flex-direction: column; gap: 7px; }
+  .study-path-meta { justify-content: flex-start; }
+  .study-path-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* 极小窗口先保证能读能问：对话抽屉占满宽度。 */
   .study.has-course .study-room { grid-template-rows: minmax(0, 1fr); }
-  .study.has-course .study-side { display: none; }
   .study.has-course .study-chat { width: calc(100% - 24px); height: min(82%, 520px); }
+}
+@media (max-width: 640px) {
+  .study-path-steps { grid-template-columns: 1fr; }
+  .study-path-steps small { white-space: normal; }
 }
 
 /* 旧 .stage header 是给页面顶栏用的 flex；讲稿头必须是普通文档流 */
@@ -741,6 +806,11 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .teacher-memory-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .teacher-memory-head .chip { font-size: 11px; }
 .teacher-memory-head .chip.confirmed { background: #eaf6f0; color: #1f7f6a; border-color: #cce9dd; }
+.teacher-memory-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.teacher-memory-actions .ghost { padding: 3px 8px; font-size: 12px; }
+.teacher-memory-confirm { color: #1f7f6a; border-color: #cce9dd; }
+.teacher-memory-edit { display: flex; flex-direction: column; gap: 6px; }
+.teacher-memory-edit textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; line-height: 1.6; color: #3d5049; border: 1px solid #dfe7e3; border-radius: 8px; padding: 8px 9px; resize: vertical; }
 .teacher-memory p { margin: 0; font-size: 13px; line-height: 1.6; color: #3d5049; }
 .teacher-memory small { display: block; line-height: 1.5; }
 .teacher-danger { flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
@@ -749,7 +819,15 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .study-teacher-note h3 { margin: 0; font-size: 15px; }
 .study-teacher-note > p { margin: 0; font-size: 13px; line-height: 1.65; color: #3d5049; }
 .study-teacher-note .study-summary-group h4 { color: #4a6fa5; }
+.teacher-note-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+.teacher-note-actions .ghost { padding: 3px 8px; font-size: 12px; }
+.teacher-note-editor { display: flex; flex-direction: column; gap: 8px; }
+.study-field textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; line-height: 1.6; color: #243247; border: 1px solid #dfe5e2; border-radius: 9px; padding: 7px 9px; background: #fff; resize: vertical; }
+.course-materials { width: min(920px, 94vw); }
+.course-materials header p { margin: 6px 0 0; }
+.course-materials-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.course-materials-column { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 @media (max-width: 640px) {
-  .teacher-profile-grid { grid-template-columns: 1fr; }
+  .teacher-profile-grid, .course-materials-body { grid-template-columns: 1fr; }
   .teacher-danger { flex-direction: column; align-items: flex-start; }
 }

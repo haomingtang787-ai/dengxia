@@ -123,6 +123,8 @@ export function registerIpc(
   bind(IpcChannel.teacherReset, () => teacher.reset())
   bind(IpcChannel.teacherNoteList, () => teacher.noteList())
   bind(IpcChannel.teacherNoteGet, (_event, body) => teacher.noteGet(body))
+  bind(IpcChannel.teacherNoteSave, (_event, body) => teacher.noteSave(body))
+  bind(IpcChannel.teacherNoteDelete, (_event, body) => teacher.noteDelete(body))
   bind(IpcChannel.appInfo, () => appInfo.info())
   bind(IpcChannel.appCheckUpdate, () => appInfo.checkUpdate())
   bind(IpcChannel.appSaveText, (event, body) => saveText(event, body))

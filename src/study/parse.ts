@@ -1,5 +1,6 @@
 import { ArgumentError } from '../domain/validation'
 import type { StudySegment, StudySummary } from '../shared/study'
+import { TEACHER_MEMORY_KINDS, type TeacherMemoryKind, type TeacherObservation } from '../shared/teacher'
 
 export type StudyPlanDraft = {
   title: string
@@ -157,12 +158,15 @@ export function parseStudySummary(raw: string): StudySummary {
   }
 }
 
-export function parseTeacherNote(raw: string): {
+export type TeacherNoteDraft = {
   summary: string
   worked: string[]
   stuck: string[]
   next: string[]
-} {
+  memories: TeacherObservation[]
+}
+
+export function parseTeacherNote(raw: string): TeacherNoteDraft {
   let parsed: unknown
   try {
     parsed = JSON.parse(unwrap(raw))
@@ -173,10 +177,26 @@ export function parseTeacherNote(raw: string): {
   const root = record(parsed)
   const summary = text(root.summary)
   if (!summary) throw new ArgumentError('模型返回的老师手记缺少总览。')
+  const memories = list(root.memories)
+    .map((item) => {
+      const row = record(item)
+      const kind = text(row.kind)
+      const statement = text(row.statement)
+      if (!statement || !(TEACHER_MEMORY_KINDS as readonly string[]).includes(kind)) return null
+      return {
+        kind: kind as TeacherMemoryKind,
+        subject: text(row.subject).slice(0, 40),
+        concept: text(row.concept).slice(0, 80),
+        statement: statement.slice(0, 400),
+      } satisfies TeacherObservation
+    })
+    .filter((item): item is TeacherObservation => Boolean(item))
+    .slice(0, 2)
   return {
     summary,
     worked: stringList(root.worked).slice(0, 5),
     stuck: stringList(root.stuck).slice(0, 5),
     next: stringList(root.next).slice(0, 5),
+    memories,
   }
 }
