@@ -145,14 +145,15 @@ afterEach(() => {
 })
 
 describe('0.7.3 schema 与课程分组', () => {
-  it('schema 升到 14，课程、课件归属和消息引用都有列', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(14)
+  it('schema 升到 15，课程、课件归属、消息引用和错题账本都有表', () => {
+    expect(CURRENT_SCHEMA_VERSION).toBe(15)
     const courseColumns = db.all<{ name: string }>('PRAGMA table_info(study_courses)').map((row) => row.name)
     expect(courseColumns).toContain('sort_order')
     const sessionColumns = db.all<{ name: string }>('PRAGMA table_info(study_sessions)').map((row) => row.name)
     expect(sessionColumns).toContain('course_id')
     const messageColumns = db.all<{ name: string }>('PRAGMA table_info(study_messages)').map((row) => row.name)
     expect(messageColumns).toContain('citations_json')
+    expect(db.get<{ name: string }>("SELECT name FROM sqlite_master WHERE type='table' AND name='study_misses'")?.name).toBe('study_misses')
   })
 
   it('旧会话按 subject 回填课程，空 subject 归未分类', () => {

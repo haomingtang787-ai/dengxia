@@ -198,8 +198,19 @@ export function StudyView({
 
   const refreshReviewStats = useCallback(async () => {
     if (!api) return
-    const result = await api.teaching.reviewSummary()
-    if (result.ok) setReviewStats(result.data)
+    const [teaching, study] = await Promise.all([
+      api.teaching.reviewSummary(),
+      api.study.reviewSummary(),
+    ])
+    // 旧 teaching 错题仍可能来自老课程；课堂题测的新错题读 study 账本，两边的未消除数一起进「今天」。
+    if (teaching.ok) {
+      setReviewStats({
+        ...teaching.data,
+        misses: teaching.data.misses + (study.ok ? study.data.misses : 0),
+      })
+    } else if (study.ok) {
+      setReviewStats({ due: 0, reviewedToday: 0, misses: study.data.misses })
+    }
   }, [api])
 
   useEffect(() => {
@@ -667,6 +678,8 @@ export function StudyView({
     setDetail(result.data)
     setMaterialsOpen(true)
     setToolFocus(tool === 'quiz-grade' ? 'quiz' : tool)
+    // 判题会新写或消除错题，右栏「今天」的错题数要马上跟上。
+    if (tool === 'quiz-grade') void refreshReviewStats()
     const labels: Partial<Record<StudyToolKind, string>> = {
       search: '老师找到了本地原文。',
       summary: '总结已放进右栏生成物。',

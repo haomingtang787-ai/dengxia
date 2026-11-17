@@ -174,6 +174,12 @@ const desk = {
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyFinish, body),
     check: (body: { sessionId: string; unitOrdinal: number; segmentIndex: number; answer: string }) =>
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyCheck, body),
+    reviewSummary: () =>
+      invoke<import('../shared/study').StudyReviewSummary>(IpcChannel.studyReviewSummary, {}),
+    misses: (body: { limit?: number }) =>
+      invoke<import('../shared/study').StudyMissList>(IpcChannel.studyMisses, body),
+    gradeMiss: (body: import('../shared/study').StudyGradeMissBody) =>
+      invoke<import('../shared/study').StudyMissItem>(IpcChannel.studyGradeMiss, body),
     clearChat: (body: { sessionId: string }) =>
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyClearChat, body),
     clearSummary: (body: { sessionId: string }) =>

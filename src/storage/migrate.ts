@@ -407,7 +407,7 @@ function backfillSearch(db: AppDatabase): void {
 }
 
 /** 恢复旧备份时用它判断备份 schema 是否比当前应用新。 */
-export const CURRENT_SCHEMA_VERSION = 14
+export const CURRENT_SCHEMA_VERSION = 15
 
 const COST_SCHEMA = `
 CREATE TABLE material_digests (
@@ -513,6 +513,32 @@ CREATE TABLE study_courses (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+`
+
+/**
+ * 1.0.1 课堂错题账本：题测判错后按题落账；session+unit+question 唯一，
+ * 重判同一题只更新答案和解析，不重复堆错题。
+ */
+const STUDY_MISS_SCHEMA = `
+CREATE TABLE study_misses (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES study_sessions(id) ON DELETE CASCADE,
+  course_id TEXT NULL REFERENCES study_courses(id) ON DELETE CASCADE,
+  unit_ordinal INTEGER NOT NULL,
+  question_id TEXT NOT NULL,
+  prompt TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  explain TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '',
+  page_number INTEGER NULL,
+  created_at TEXT NOT NULL,
+  last_practiced_at TEXT NULL,
+  resolved_at TEXT NULL,
+  UNIQUE(session_id, unit_ordinal, question_id)
+);
+
+CREATE INDEX idx_study_misses_open ON study_misses(resolved_at, created_at DESC);
+CREATE INDEX idx_study_misses_session ON study_misses(session_id, created_at DESC);
 `
 
 /**
@@ -678,6 +704,13 @@ export function migrate(db: AppDatabase): void {
       db.exec('ALTER TABLE study_messages ADD COLUMN citations_json TEXT NOT NULL DEFAULT \'[]\'')
       backfillStudyCourses(db)
       db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 14, nowIso())
+    })
+  }
+  if (!hasVersion(db, 15)) {
+    db.transaction(() => {
+      // 1.0.1：课堂题测的错题独立落账，右栏、复习页、重练都读这一份。
+      db.exec(STUDY_MISS_SCHEMA)
+      db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 15, nowIso())
     })
   }
 }

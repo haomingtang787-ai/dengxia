@@ -4,6 +4,7 @@ import type {
   StudyCourse,
   StudyMessage,
   StudyMessageRole,
+  StudyMissItem,
   StudySessionListItem,
   StudySlideCitation,
   StudyStatus,
@@ -80,6 +81,40 @@ export type StudyArtifactRow = {
   body_json: string
   created_at: string
   updated_at: string
+}
+
+export type StudyMissRow = {
+  id: string
+  session_id: string
+  course_id: string | null
+  unit_ordinal: number
+  question_id: string
+  prompt: string
+  answer: string
+  explain: string
+  source: string
+  page_number: number | null
+  created_at: string
+  last_practiced_at: string | null
+  resolved_at: string | null
+}
+
+export function missFromRow(row: StudyMissRow): StudyMissItem {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    courseId: row.course_id,
+    unitOrdinal: row.unit_ordinal,
+    questionId: row.question_id,
+    prompt: row.prompt,
+    answer: row.answer,
+    explain: row.explain,
+    source: row.source,
+    pageNumber: row.page_number,
+    createdAt: row.created_at,
+    lastPracticedAt: row.last_practiced_at,
+    resolvedAt: row.resolved_at,
+  }
 }
 
 export type SessionBundle = {
@@ -385,6 +420,79 @@ export class StudyStore {
       )
       this.db.run('UPDATE study_sessions SET updated_at = ? WHERE id = ?', row.created_at, row.session_id)
     })
+  }
+
+  /** 同一道题只留一条错题；重判时更新作答与解析，并重新打开。 */
+  upsertMiss(row: StudyMissRow): void {
+    this.db.run(
+      `INSERT INTO study_misses(
+         id, session_id, course_id, unit_ordinal, question_id, prompt, answer, explain,
+         source, page_number, created_at, last_practiced_at, resolved_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, unit_ordinal, question_id) DO UPDATE SET
+         prompt = excluded.prompt,
+         answer = excluded.answer,
+         explain = excluded.explain,
+         source = excluded.source,
+         page_number = excluded.page_number,
+         created_at = excluded.created_at,
+         last_practiced_at = NULL,
+         resolved_at = NULL`,
+      row.id,
+      row.session_id,
+      row.course_id,
+      row.unit_ordinal,
+      row.question_id,
+      row.prompt,
+      row.answer,
+      row.explain,
+      row.source,
+      row.page_number,
+      row.created_at,
+      row.last_practiced_at,
+      row.resolved_at,
+    )
+  }
+
+  /** 重判答对时，把同一道题的旧错题关掉。 */
+  resolveMissByQuestion(sessionId: string, unitOrdinal: number, questionId: string, at: string): void {
+    this.db.run(
+      `UPDATE study_misses SET resolved_at = ?, last_practiced_at = ?
+       WHERE session_id = ? AND unit_ordinal = ? AND question_id = ? AND resolved_at IS NULL`,
+      at,
+      at,
+      sessionId,
+      unitOrdinal,
+      questionId,
+    )
+  }
+
+  listOpenMisses(limit: number): StudyMissItem[] {
+    return this.db.all<StudyMissRow>(
+      'SELECT * FROM study_misses WHERE resolved_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT ?',
+      limit,
+    ).map(missFromRow)
+  }
+
+  countOpenMisses(): number {
+    return this.db.get<{ total: number }>('SELECT COUNT(*) AS total FROM study_misses WHERE resolved_at IS NULL')?.total ?? 0
+  }
+
+  getMiss(id: string): StudyMissItem | undefined {
+    const row = this.db.get<StudyMissRow>('SELECT * FROM study_misses WHERE id = ?', id)
+    return row ? missFromRow(row) : undefined
+  }
+
+  /** remembered=true 表示这次记住了，关掉错题；false 表示又忘了，留在队列里。 */
+  gradeMiss(id: string, remembered: boolean, at: string): StudyMissItem | undefined {
+    this.db.run(
+      `UPDATE study_misses SET last_practiced_at = ?, resolved_at = ?
+       WHERE id = ?`,
+      at,
+      remembered ? at : null,
+      id,
+    )
+    return this.getMiss(id)
   }
 
   /** 同一份文稿、材料没变过时，逐段理解结果直接复用，不再重复扣 API。 */

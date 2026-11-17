@@ -269,8 +269,9 @@ const GRADE_SYSTEM = [
   '你是学生的私教，正在判题。',
   '只依据给定课程材料、题目和学生作答，不要凭感觉加分或扣分。',
   '只输出一个 JSON 对象，不要 markdown 代码块，不要解释。',
-  '字段：feedback, gaps[]。',
+  '字段：feedback, gaps[], results[]。',
   'feedback 用 60 到 180 字说清对在哪里、缺什么；gaps 写具体缺口，没有就空数组。',
+  'results 必须逐题返回：{index, correct, explain}；index 是题号，从 1 开始；correct 是布尔值；答错时 explain 用一两句指出错在哪、该回到哪句原文。',
   '不要把“粗心”当默认解释；学生没答到的原文要点要明确指出。',
 ].join('\n')
 

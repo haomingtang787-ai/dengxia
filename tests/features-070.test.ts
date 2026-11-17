@@ -28,7 +28,7 @@ afterEach(() => {
 describe('0.7.0 老师地基', () => {
   it('迁移到 schema 12，默认人格是“老师”，重复迁移不丢数据', () => {
     const latest = db.get<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')?.version
-    expect(latest).toBe(14)
+    expect(latest).toBe(15)
 
     const overview = teacher.overview()
     expect(overview.ok).toBe(true)
@@ -41,7 +41,7 @@ describe('0.7.0 老师地基', () => {
     db.run('INSERT INTO documents(id, display_name, created_at) VALUES (?, ?, ?)', docId, '迁移不能丢.pdf', '2026-11-17T10:00:00.000Z')
     migrate(db)
     expect(db.get<{ total: number }>('SELECT COUNT(*) AS total FROM documents')?.total).toBe(1)
-    expect(db.get<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')?.version).toBe(14)
+    expect(db.get<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')?.version).toBe(15)
   })
 
   it('人格与档案可保存，重开库后仍是保存值', () => {

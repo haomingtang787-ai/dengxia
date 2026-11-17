@@ -13,9 +13,12 @@ import type {
   StudyCourseTree,
   StudyCourseTreeItem,
   StudyMessage,
+  StudyMissItem,
+  StudyMissList,
   StudyMode,
   StudyQuizAnswer,
   StudyQuizQuestion,
+  StudyReviewSummary,
   StudySessionDetail,
   StudySessionList,
   StudyProgress,
@@ -30,7 +33,7 @@ import type {
   StudyUsageKind,
 } from '../shared/study'
 import type { AppDatabase } from '../storage/database'
-import { StudyStore, messageFromRow, type StudyArtifactRow, type StudyMessageRow, type StudySessionRow, type StudyUnitRow } from '../storage/studyStore'
+import { StudyStore, messageFromRow, type StudyArtifactRow, type StudyMessageRow, type StudyMissRow, type StudySessionRow, type StudyUnitRow } from '../storage/studyStore'
 import type { Habits } from '../teaching/habits'
 import type { TeacherService } from '../teaching/teacherService'
 import { DEFAULT_HABITS, sanitizeHabits } from '../teaching/habits'
@@ -64,6 +67,13 @@ const MAX_MESSAGE_CHARS = 4_000
 const MAX_ANSWER_CHARS = 2_000
 const MAX_TOOL_ANSWER_CHARS = 1_200
 const MAX_SEARCH_QUERY_CHARS = 80
+
+/** 小讲来源可能是“第 2 页”或“p.14”，错题卡能显示页码就显示，找不到就留空。 */
+function pageNumberFromSource(source: string): number | null {
+  const match = /(?:第\s*(\d+)\s*页|p\.?\s*(\d+))/i.exec(source)
+  if (!match) return null
+  return Number(match[1] ?? match[2])
+}
 
 export type StudyServiceOptions = {
   db: AppDatabase
@@ -553,6 +563,58 @@ export class StudyService {
         })
         const raw = await client.complete(prompt.system, prompt.user, 1800, 'disabled', 'tool-quiz-grade')
         const grade = parseQuizGrade(raw)
+        const answerMap = new Map(input.answers.map((answer) => [answer.questionId, answer.answer]))
+        const unitOrdinal = unit?.ordinal ?? -1
+        const pageNumber = pageNumberFromSource(unit?.source ?? '')
+        // 逐题结果才落账；模型没按契约回 results 时，至少把这次缺口记成一条可重练的错题，避免题白做。
+        if (grade.results.length > 0) {
+          // 旧的“整次缺口”聚合错题被逐题结果取代，先关掉，避免重复。
+          this.store.resolveMissByQuestion(session.id, unitOrdinal, 'grade-gaps', stamp)
+          for (const result of grade.results) {
+            const question = questions[result.index - 1]
+            if (!question) continue
+            const answer = answerMap.get(question.id) ?? ''
+            if (result.correct) {
+              this.store.resolveMissByQuestion(session.id, unitOrdinal, question.id, stamp)
+              continue
+            }
+            const miss: StudyMissRow = {
+              id: randomUUID(),
+              session_id: session.id,
+              course_id: session.course_id,
+              unit_ordinal: unitOrdinal,
+              question_id: question.id,
+              prompt: question.prompt,
+              answer,
+              explain: result.explain || grade.feedback,
+              source: question.source,
+              page_number: pageNumber,
+              created_at: stamp,
+              last_practiced_at: null,
+              resolved_at: null,
+            }
+            this.store.upsertMiss(miss)
+          }
+        } else if (grade.gaps.length > 0) {
+          this.store.upsertMiss({
+            id: randomUUID(),
+            session_id: session.id,
+            course_id: session.course_id,
+            unit_ordinal: unitOrdinal,
+            question_id: 'grade-gaps',
+            prompt: `这次题测的缺口：${grade.gaps.join('；')}`,
+            answer: '',
+            explain: grade.feedback,
+            source: unit?.source ?? '',
+            page_number: pageNumber,
+            created_at: stamp,
+            last_practiced_at: null,
+            resolved_at: null,
+          })
+        } else {
+          // 这次没有缺口，旧的聚合错题也应消除。
+          this.store.resolveMissByQuestion(session.id, unitOrdinal, 'grade-gaps', stamp)
+        }
         this.saveToolArtifact(session.id, 'quiz', scope, existing.title, {
           ...quizBody,
           questions,
@@ -633,6 +695,43 @@ export class StudyService {
         }
       }
       return ok(requestId, this.detail(sessionId))
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
+  /** 右栏“今天”和学习页共用：只数仍未消除的课堂错题。 */
+  reviewSummary(): Result<StudyReviewSummary> {
+    return ok(randomUUID(), { misses: this.store.countOpenMisses() })
+  }
+
+  /** 复习页的错题列表；默认只给未消除的，limit 限制在 1..100。 */
+  misses(body: unknown): Result<StudyMissList> {
+    const requestId = randomUUID()
+    try {
+      const input = isPlainObject(body) ? body : {}
+      const limit = typeof input.limit === 'number' && Number.isFinite(input.limit)
+        ? Math.min(100, Math.max(1, Math.trunc(input.limit)))
+        : 20
+      return ok(requestId, { items: this.store.listOpenMisses(limit) })
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
+  /** 重练错题：remembered=true 关掉，false 留着重练。 */
+  gradeMiss(body: unknown): Result<StudyMissItem> {
+    const requestId = randomUUID()
+    try {
+      if (!isPlainObject(body)) throw new ArgumentError('请求格式不正确。')
+      const missId = typeof body.missId === 'string' ? body.missId.trim() : ''
+      if (!isUuid(missId)) throw new ArgumentError('missId 不是有效的错题。')
+      const existing = this.store.getMiss(missId)
+      if (!existing) throw new ArgumentError('找不到这道错题。')
+      const remembered = body.remembered === true
+      const updated = this.store.gradeMiss(missId, remembered, nowIso())
+      if (!updated) throw new ArgumentError('找不到这道错题。')
+      return ok(requestId, updated)
     } catch (error) {
       return this.failure(requestId, error)
     }

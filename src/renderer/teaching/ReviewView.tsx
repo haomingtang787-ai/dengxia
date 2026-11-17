@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { DayMarkView, DueCardItem, MissItem, ReviewSummary, TeachingCard } from '../../shared/teaching'
+import type { StudyMissItem } from '../../shared/study'
 import type { ReviewSettingsView } from '../../shared/contract'
 import { MathText } from '../components/MathText'
 
@@ -29,6 +30,8 @@ export function ReviewView({
   const api = window.desk
   const [due, setDue] = useState<DueCardItem[]>([])
   const [misses, setMisses] = useState<MissItem[]>([])
+  const [studyMisses, setStudyMisses] = useState<StudyMissItem[]>([])
+  const [studyMissCount, setStudyMissCount] = useState(0)
   const [cards, setCards] = useState<TeachingCard[]>([])
   const [today, setToday] = useState<DayMarkView | null>(null)
   const [summary, setSummary] = useState<ReviewSummary | null>(null)
@@ -43,17 +46,22 @@ export function ReviewView({
 
   const refresh = useCallback(async () => {
     if (!api) return
-    const [dueResult, missResult, todayResult, summaryResult, settingsResult, cardResult] = await Promise.all([
+    const [dueResult, missResult, todayResult, summaryResult, settingsResult, cardResult, studyMissResult, studySummaryResult] = await Promise.all([
       api.teaching.dueCards(),
       api.teaching.misses({ limit: 40 }),
       api.teaching.today(),
       api.teaching.reviewSummary(),
       api.review.settings(),
       api.teaching.cards.list(),
+      api.study.misses({ limit: 40 }),
+      api.study.reviewSummary(),
     ])
     if (dueResult.ok) setDue(dueResult.data.items)
     else notify('bad', dueResult.error.message)
     if (missResult.ok) setMisses(missResult.data.items)
+    if (studyMissResult.ok) setStudyMisses(studyMissResult.data.items)
+    if (studySummaryResult.ok) setStudyMissCount(studySummaryResult.data.misses)
+    else if (studyMissResult.ok) setStudyMissCount(studyMissResult.data.items.length)
     if (todayResult.ok) setToday(todayResult.data)
     if (summaryResult.ok) setSummary(summaryResult.data)
     if (settingsResult.ok) setSettings(settingsResult.data)
@@ -72,8 +80,9 @@ export function ReviewView({
     const hour = now.getHours()
     if (hour < 9 || hour >= 22) return
     if (!settings.remind) return
+    const totalMisses = summary.misses + studyMissCount
     const behindCards = summary.due > 0 && summary.reviewedToday < settings.cardsPerDay
-    const behindMisses = settings.missesPerDay > 0 && summary.misses >= settings.missesPerDay
+    const behindMisses = settings.missesPerDay > 0 && totalMisses >= settings.missesPerDay
     if (!behindCards && !behindMisses) return
     const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`
     const storageKey = `dengxia-review-reminded-${dayKey}`
@@ -81,12 +90,13 @@ export function ReviewView({
     localStorage.setItem(storageKey, '1')
     const body = behindCards
       ? `今天还有 ${summary.due} 张卡到点，已复习 ${summary.reviewedToday}/${settings.cardsPerDay} 张。`
-      : `错题本还有 ${summary.misses} 道，今天的目标是 ${settings.missesPerDay} 道。`
+      : `错题本还有 ${totalMisses} 道，今天的目标是 ${settings.missesPerDay} 道。`
     void api.app.notify({ title: '灯下 · 复习提醒', body })
-  }, [api, loading, settings, summary])
+  }, [api, loading, settings, summary, studyMissCount])
 
   const current = due[0] ?? null
   const currentKey = current ? `${current.origin}|${current.lectureId ?? ''}|${current.card.id}` : ''
+  const totalMisses = (summary?.misses ?? 0) + studyMissCount
   const reviewed = summary?.reviewedToday ?? 0
   const goal = Math.max(1, settings.cardsPerDay)
   const goalPercent = Math.min(100, Math.round((reviewed / goal) * 100))
@@ -124,6 +134,24 @@ export function ReviewView({
       return
     }
     notify('info', remembered ? '这道错题往下一个箱走了。' : '这道错题回到第一箱，一分钟后还会来。')
+    setRevealedMiss((state) => {
+      const next = { ...state }
+      delete next[miss.id]
+      return next
+    })
+    await refresh()
+  }
+
+  async function gradeStudyMiss(miss: StudyMissItem, remembered: boolean) {
+    if (!api) return
+    setBusy(true)
+    const result = await api.study.gradeMiss({ missId: miss.id, remembered })
+    setBusy(false)
+    if (!result.ok) {
+      notify('bad', result.error.message)
+      return
+    }
+    notify('info', remembered ? '这道课堂错题消除了。' : '这道错题还留着，下次再练。')
     setRevealedMiss((state) => {
       const next = { ...state }
       delete next[miss.id]
@@ -202,7 +230,7 @@ export function ReviewView({
             {today ? <span className="chip">今天 听懂 {today.known}</span> : null}
             {today ? <span className="chip">题 {today.quizzes}</span> : null}
             <span className="chip">{due.length} 张到点</span>
-            <span className="chip">{misses.length} 道错题</span>
+            <span className="chip">{totalMisses} 道错题</span>
           </div>
         </div>
         <div className="row">
@@ -286,7 +314,7 @@ export function ReviewView({
 
       <section>
         <h3>错题本</h3>
-        {misses.length === 0 ? <p className="quiet">还没有错题。答错的题会自己进来。</p> : null}
+        {totalMisses === 0 ? <p className="quiet">还没有错题。答错的题会自己进来。</p> : null}
         <div className="misses">
           {misses.map((miss) => (
             <div key={miss.id} className="miss">
@@ -303,6 +331,30 @@ export function ReviewView({
                 <div className="row">
                   <button className="ghost" onClick={() => setRevealedMiss((state) => ({ ...state, [miss.id]: true }))}>再练一次</button>
                   <span className="quiet">第 {miss.box} 箱{miss.lastGradedAt ? ` · 上次 ${new Date(miss.lastGradedAt).toLocaleDateString('zh-CN')}` : ''}</span>
+                </div>
+              )}
+            </div>
+          ))}
+          {studyMisses.map((miss) => (
+            <div key={`study:${miss.id}`} className="miss">
+              <p className="miss-prompt"><MathText text={miss.prompt} /></p>
+              <p className="quiet">
+                课堂题测 · {miss.unitOrdinal >= 0 ? `第 ${miss.unitOrdinal + 1} 讲` : '整门课'}{miss.pageNumber ? ` · p.${miss.pageNumber}` : ''}
+                {miss.source ? ` · 原句：${miss.source}` : ''}
+              </p>
+              {revealedMiss[miss.id] ? (
+                <>
+                  <p className="quiet">你当时答：{miss.answer || '（未作答）'}</p>
+                  {miss.explain ? <p className="quiet"><MathText text={miss.explain} /></p> : null}
+                  <div className="row">
+                    <button className="primary" disabled={busy} onClick={() => void gradeStudyMiss(miss, true)}>这次记得</button>
+                    <button className="ghost" disabled={busy} onClick={() => void gradeStudyMiss(miss, false)}>又忘了</button>
+                  </div>
+                </>
+              ) : (
+                <div className="row">
+                  <button className="ghost" onClick={() => setRevealedMiss((state) => ({ ...state, [miss.id]: true }))}>再练一次</button>
+                  <span className="quiet">{miss.lastPracticedAt ? `上次 ${new Date(miss.lastPracticedAt).toLocaleDateString('zh-CN')}` : '还没重练过'}</span>
                 </div>
               )}
             </div>

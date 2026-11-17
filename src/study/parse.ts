@@ -173,6 +173,8 @@ export type StudyQuizDraft = {
 export type QuizGradeDraft = {
   feedback: string
   gaps: string[]
+  /** index 是题号（1 起），用来把判题结果映射回题测里的具体一道题。 */
+  results: Array<{ index: number; correct: boolean; explain: string }>
 }
 
 export type TeachbackDraft = {
@@ -216,7 +218,16 @@ export function parseQuizGrade(raw: string): QuizGradeDraft {
   const root = record(parsed)
   const feedback = text(root.feedback)
   if (!feedback) throw new ArgumentError('模型没有返回判题反馈。')
-  return { feedback, gaps: stringList(root.gaps).slice(0, 6) }
+  const results = list(root.results)
+    .map((item) => {
+      const row = record(item)
+      const index = clampInt(row.index, 1, 99, 0)
+      if (index === 0) return null
+      return { index, correct: row.correct === true, explain: text(row.explain) }
+    })
+    .filter((item): item is { index: number; correct: boolean; explain: string } => item !== null)
+    .slice(0, 12)
+  return { feedback, gaps: stringList(root.gaps).slice(0, 6), results }
 }
 
 export function parseTeachback(raw: string): TeachbackDraft {

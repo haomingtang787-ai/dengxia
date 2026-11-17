@@ -111,6 +111,29 @@ export type StudyQuizAnswer = {
   answer: string
 }
 
+/** 课堂题测留下的错题；和旧 teaching.misses 分开，避免把 lecture_id 硬塞进 study 会话。 */
+export type StudyMissItem = {
+  id: string
+  sessionId: string
+  courseId: string | null
+  unitOrdinal: number
+  questionId: string
+  prompt: string
+  answer: string
+  explain: string
+  source: string
+  pageNumber: number | null
+  createdAt: string
+  lastPracticedAt: string | null
+  resolvedAt: string | null
+}
+
+export type StudyMissList = { items: StudyMissItem[] }
+
+export type StudyReviewSummary = { misses: number }
+
+export type StudyGradeMissBody = { missId: string; remembered: boolean }
+
 /** 工具生成物：只落在课程资料里，不另开页面。 */
 export type StudyArtifactKind = 'summary' | 'outline' | 'search' | 'quiz' | 'teachback'
 

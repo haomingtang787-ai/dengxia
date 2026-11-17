@@ -379,6 +379,30 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 1200))
     return
   }
+  if (action === 'review-grade') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === '复习'); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    const opened = await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('.miss button')].find((item) => item.textContent.trim() === '再练一次'); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const graded = await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('.miss button')].find((item) => item.textContent.trim() === '又忘了'); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    console.log('[smoke] review-grade', JSON.stringify({
+      opened,
+      graded,
+      card: await win.webContents.executeJavaScript(`(document.querySelector('.miss')?.innerText || '').replace(/\\n/g, ' / ')`),
+      chip: await win.webContents.executeJavaScript(
+        `([...document.querySelectorAll('.chip')].find((item) => item.textContent.includes('错题'))?.textContent || '').trim()`,
+      ),
+    }))
+    return
+  }
   if (action === 'workspace-quiz') {
     await new Promise((resolve) => setTimeout(resolve, 1200))
     await win.webContents.executeJavaScript(`(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`)
