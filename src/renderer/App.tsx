@@ -11,6 +11,8 @@ import type { SearchHit } from '../shared/search'
 import type { HighlightView } from '../shared/highlights'
 import { HighlightText } from './components/HighlightText'
 import { MathText } from './components/MathText'
+import { HelpGuide } from './components/HelpGuide'
+import { FEATURE_LABELS } from './study/guide'
 
 const STATE_LABEL: Record<string, string> = {
   queued: '排队',
@@ -105,6 +107,22 @@ export function App() {
   useEffect(() => {
     viewRef.current = view
   }, [view])
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get('help') === 'off') return
+    try {
+      if (window.localStorage.getItem('desk-help-seen-v1') !== '1') setHelpOpen(true)
+    } catch {
+      setHelpOpen(true)
+    }
+  }, [])
+  const closeHelp = useCallback(() => {
+    setHelpOpen(false)
+    try {
+      window.localStorage.setItem('desk-help-seen-v1', '1')
+    } catch {
+      // 本机存储不可用时，仍然让用户关掉当前弹层。
+    }
+  }, [])
   const showNotice = useCallback((tone: 'info' | 'bad', text: string) => setNotice({ tone, text }), [])
   useEffect(() => {
     if (!notice) return
@@ -112,6 +130,8 @@ export function App() {
     return () => window.clearTimeout(timer)
   }, [notice])
   const [aiOpen, setAiOpen] = useState(false)
+  // 第一次打开先给一页“怎么用”，之后右上角“怎么用”随时能再打开。
+  const [helpOpen, setHelpOpen] = useState(false)
   // 左侧文稿栏可收起：听课时把宽度让给讲稿。
   const [libraryOpen, setLibraryOpen] = useState(true)
   // 删除文稿是破坏性操作：先点「×」展开确认条，再点「确认删除」才真的删。
@@ -510,7 +530,7 @@ export function App() {
       return
     }
     setReviewForm(result.data)
-    setNotice({ tone: 'info', text: `复习目标已保存：每天 ${result.data.cardsPerDay} 张卡、${result.data.missesPerDay} 道错题。` })
+    setNotice({ tone: 'info', text: `复习计划已保存：每天 ${result.data.cardsPerDay} 张卡、${result.data.missesPerDay} 道错题。` })
   }
 
   async function saveDataSettings(patch: import('../shared/data').SaveAppSettingsBody) {
@@ -532,7 +552,7 @@ export function App() {
     setDataBusy(false)
     if (!picked.ok || !picked.data.path) return
     await saveDataSettings({ backup: { enabled: true, directory: picked.data.path } })
-    setNotice({ tone: 'info', text: '自动备份目录已保存。' })
+    setNotice({ tone: 'info', text: '自动备份位置已保存。' })
   }
 
   async function inspectRestore() {
@@ -856,7 +876,7 @@ export function App() {
       return
     }
     setExcerpt(null)
-    setNotice({ tone: 'info', text: '已做成卡片，会进入复习队列。' })
+    setNotice({ tone: 'info', text: `已做成复习卡，会进入「${FEATURE_LABELS.review}」。` })
   }
 
   const outline = useMemo(() => [...unpaged, ...pageBlocks], [unpaged, pageBlocks])
@@ -892,11 +912,12 @@ export function App() {
           <div className="top-side">
             <div className="row">
               <nav className="tabs">
-                <button className={`tab ${view === 'doc' ? 'active' : ''}`} onClick={() => setView('doc')}>文稿</button>
-                <button className={`tab ${view === 'study' ? 'active' : ''}`} onClick={() => setView('study')}>老师</button>
-                <button className={`tab ${view === 'review' ? 'active' : ''}`} onClick={() => setView('review')}>复习</button>
+                <button className={`tab ${view === 'doc' ? 'active' : ''}`} title="按课件原样阅读、搜索和看页码" onClick={() => setView('doc')}>课件库</button>
+                <button className={`tab ${view === 'study' ? 'active' : ''}`} title="跟老师一讲一讲地学" onClick={() => setView('study')}>课堂</button>
+                <button className={`tab ${view === 'review' ? 'active' : ''}`} title="复习今天该复习的卡片和课堂错题" onClick={() => setView('review')}>{FEATURE_LABELS.review}</button>
               </nav>
-              <button className="ghost" onClick={() => void openAi()}>模型{aiStatus?.configured ? ' · 已配置' : aiStatus ? ' · 未配置' : ''}</button>
+              <button className="ghost" onClick={() => void openAi()}>模型设置{aiStatus?.configured ? ' · 已配置' : aiStatus ? ' · 未配置' : ''}</button>
+              <button className="ghost" onClick={() => setHelpOpen(true)} title="打开使用指南">怎么用</button>
             </div>
             <p className="quiet">没有账号，没有云同步；模型只用你自己填的那一个。</p>
           </div>
@@ -1230,7 +1251,7 @@ export function App() {
         <div className="modal-backdrop" role="dialog" aria-modal="true" onClick={() => setAiOpen(false)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <header>
-              <h2>模型</h2>
+              <h2>{FEATURE_LABELS.model}</h2>
               <button className="ghost" onClick={() => setAiOpen(false)}>关闭</button>
             </header>
             <p className="quiet">默认用 DeepSeek 的 deepseek-flash，已原生支持图片输入。也可以填任何 OpenAI 兼容的地址；密钥只留在这台电脑的 settings.json 里，不进日志，也不下发给界面。</p>
@@ -1301,7 +1322,7 @@ export function App() {
             {aiMessage ? <p className={aiMessage.tone === 'bad' ? 'warning' : 'quiet'}>{aiMessage.text}</p> : null}
             <p className="quiet">模型只在这台机器上处理你点「模型拆讲」的那一页原文；不填密钥时「本地拆讲」照旧可用。</p>
             <section className="settings-block">
-              <h3>复习目标</h3>
+              <h3>复习计划</h3>
               <div className="goal-form">
                 <label>
                   每天卡片
@@ -1329,13 +1350,13 @@ export function App() {
                     checked={reviewForm.remind}
                     onChange={(event) => setReviewForm((current) => ({ ...current, remind: event.target.checked }))}
                   />
-                  到点没复习时提醒我
+                  到复习时间提醒我
                 </label>
                 <button className="ghost" disabled={dataBusy} onClick={() => void saveReviewGoal()}>保存目标</button>
               </div>
             </section>
             <section className="settings-block">
-              <h3>本机数据</h3>
+              <h3>本机占用</h3>
               {storage ? (
                 <p className="quiet">
                   占用 {formatBytes(storage.totalBytes)}：库 {formatBytes(storage.databaseBytes)}、原文 {formatBytes(storage.originalsBytes)}、页面图 {formatBytes(storage.artifactsBytes)}
@@ -1346,9 +1367,13 @@ export function App() {
                   {stats.documents} 份文稿 · {stats.pages} 页 · {stats.lectures} 节课 · {stats.cards} 张卡 · {stats.misses} 道错题 · AI 调用 {stats.aiCalls} 次、输入 {formatNumber(stats.promptTokens + stats.cachedTokens)} tokens
                 </p>
               ) : null}
+            </section>
+            <section className="settings-block">
+              <h3>{FEATURE_LABELS.backup}（整个资料库）</h3>
+              <p className="quiet">备份会把课程、课件、卡片、错题和本机设置复制到你选的文件夹；不是导出某一份课件。恢复会用备份覆盖当前资料库，所以会先给你看备份里有多少内容，再让你确认。</p>
               <div className="row">
                 <button className="ghost" disabled={dataBusy} onClick={() => void backupLibrary()}>
-                  {dataBusy ? '正在备份…' : '备份整库到文件夹'}
+                  {dataBusy ? '正在备份…' : '备份整个资料库'}
                 </button>
                 <span className="quiet">不含 API 密钥，也不含临时解析目录。</span>
               </div>
@@ -1366,7 +1391,7 @@ export function App() {
                           void saveDataSettings({ backup: { enabled } })
                         }}
                       />
-                      每天自动备份一次
+                      每天自动备份整个资料库一次
                     </label>
                     <span className="quiet">保留
                       <input
@@ -1384,12 +1409,12 @@ export function App() {
                     </span>
                   </div>
                   <div className="row">
-                    <button className="ghost" disabled={dataBusy} onClick={() => void chooseBackupDirectory()}>选择自动备份文件夹</button>
+                    <button className="ghost" disabled={dataBusy} onClick={() => void chooseBackupDirectory()}>选择自动备份位置</button>
                     <span className="quiet">{appSettings.backup.directory || '还没选目录'} {appSettings.backup.lastAt ? `· 上次 ${new Date(appSettings.backup.lastAt).toLocaleString('zh-CN')}` : ''}</span>
                   </div>
                   <div className="row">
                     <button className="ghost" disabled={restoreBusy} onClick={() => void inspectRestore()}>
-                      {restoreBusy ? '正在检查备份…' : '从备份恢复…'}
+                      {restoreBusy ? '正在检查备份…' : '用备份恢复整个资料库'}
                     </button>
                     <span className="quiet">会先给你看备份里有多少东西，再让你确认。</span>
                   </div>
@@ -1413,7 +1438,7 @@ export function App() {
               ) : null}
             </section>
             <section className="settings-block">
-              <h3>AI 用量护栏</h3>
+              <h3>每月模型用量上限</h3>
               {appSettings ? (
                 <>
                   <p className="quiet">按自然月累计「输入 + 输出」token。填 0 表示关闭；超过上限时默认直接拦住下一次模型调用。</p>
@@ -1490,6 +1515,7 @@ export function App() {
           </div>
         </div>
       ) : null}
+      {helpOpen ? <HelpGuide onClose={closeHelp} /> : null}
       {selection ? (
         <div className="selection-toolbar" style={{ left: selection.x, top: selection.y }}>
           <span>已选 {selection.quote.length} 字</span>

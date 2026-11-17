@@ -28,6 +28,7 @@ import { StudyTools } from './StudyTools'
 import { PagePeek } from './PagePeek'
 import { bboxStyle, citationPage, evidenceLayout } from './evidence'
 import { documentWaitText, isDocumentReady, scrollTargetSelector } from './ux'
+import { FEATURE_LABELS } from './guide'
 import {
   AVOID_OPTIONS,
   DEFAULT_HABITS,
@@ -526,8 +527,8 @@ export function StudyView({
       return
     }
     setDetail(outline.data)
-    setRailNote('复习总结和大纲已生成，点下面的生成物就能看。')
-    notify('info', '复习总结和大纲已放进右栏「生成物」，点开就能看。')
+    setRailNote('复习总结和大纲已生成，点右栏「学习资料」就能看。')
+    notify('info', '复习总结和大纲已放进右栏「学习资料」，点开就能看。')
   }
 
   function cardSeeds(unit: StudyUnit) {
@@ -574,7 +575,7 @@ export function StudyView({
     if (created) setRailNote(`已生成 ${created} 张卡片，去「复习」里看。`)
     else if (failed) setRailNote('卡片这次没写成，稍后再试。')
     else setRailNote('这些知识点已经有卡片了，没有重复生成。')
-    if (created) notify('info', `已把这一讲的 ${created} 张卡片放进复习队列，去「复习」里看。`)
+    if (created) notify('info', `已把这一讲的 ${created} 张卡片放进复习队列，去「${FEATURE_LABELS.review}」里看。`)
     else if (failed) notify('bad', '卡片这次没写成，稍后再试一次。')
     else notify('info', '这些知识点已经有卡片了，没有重复生成。')
   }
@@ -674,7 +675,7 @@ export function StudyView({
     setQuestion('')
     setBusy(null)
     const changed = result.data.artifacts.find((item) => before.get(item.id) !== item.updatedAt)
-    if (changed) notify('info', '老师把生成物放到右栏「生成物」里了。')
+    if (changed) notify('info', '老师把资料放到右栏「学习资料」里了。')
   }
 
   function quickAsk(content: string) {
@@ -709,9 +710,9 @@ export function StudyView({
     if (tool === 'quiz-grade') void refreshReviewStats()
     const labels: Partial<Record<StudyToolKind, string>> = {
       search: '老师找到了本地原文。',
-      summary: '总结已放进右栏生成物。',
-      outline: '复习大纲已放进右栏生成物。',
-      quiz: '题测已放进右栏生成物，先答再判。',
+      summary: '总结已放进右栏「学习资料」。',
+      outline: '复习大纲已放进右栏「学习资料」。',
+      quiz: '题测已放进右栏「学习资料」，先答再判。',
       'quiz-grade': '老师看完了你的作答。',
       teachback: '老师听完了你的复述。',
     }
@@ -922,15 +923,15 @@ export function StudyView({
           </div>
 
           <footer className="ws-left-foot">
-            <button onClick={onOpenReview}>
+            <button onClick={onOpenReview} title="复习今天该复习的卡片和课堂错题">
               <span>◫</span>
-              <b>复习</b>
-              <small>到点再练</small>
+              <b>{FEATURE_LABELS.review}</b>
+              <small>复习卡 · 错题本</small>
             </button>
-            <button onClick={onOpenSettings}>
+            <button onClick={onOpenSettings} title="设置模型、备份和恢复整个资料库">
               <span>⚙</span>
               <b>设置</b>
-              <small>模型与本机</small>
+              <small>模型 · 备份 · 恢复</small>
             </button>
           </footer>
         </>
@@ -1094,30 +1095,30 @@ export function StudyView({
               </p>
             </div>
             <div className="ws-head-actions">
-              <button className="ghost ws-context-toggle" onClick={() => setRightOpen((open) => !open)}>这一讲</button>
-              <button className="ghost ws-materials-btn" onClick={() => { setToolFocus(null); setMaterialsOpen(true) }}>整份课件</button>
+              <button className="ghost ws-context-toggle" title="打开或收起右边：这一讲的讲稿、知识点、题和资料" onClick={() => setRightOpen((open) => !open)}>{FEATURE_LABELS.context}</button>
+              <button className="ghost ws-materials-btn" title="看整份课件的目录、学习总结、老师手记和用量" onClick={() => { setToolFocus(null); setMaterialsOpen(true) }}>{FEATURE_LABELS.materials}</button>
               <div className="study-manage">
-                <button className="ghost" onClick={() => { setMoreOpen((open) => !open); setConfirmAction(null) }}>更多</button>
+                <button className="ghost" title="改名、导入另一份课件、清空对话或删除这份课堂" onClick={() => { setMoreOpen((open) => !open); setConfirmAction(null) }}>{FEATURE_LABELS.manage}</button>
                 {moreOpen ? (
                   <div className="study-manage-menu ws-more-menu">
-                    <p className="study-menu-label">这份课件</p>
-                    <button onClick={() => { setMoreOpen(false); setToolFocus(null); setMaterialsOpen(true) }}>整份课件资料</button>
-                    <button onClick={() => { setMoreOpen(false); setTeacherOpen(true) }}>老师档案</button>
+                    <p className="study-menu-label">整份课件的资料</p>
+                    <button onClick={() => { setMoreOpen(false); setToolFocus(null); setMaterialsOpen(true) }}>看整份课件总览</button>
+                    <button onClick={() => { setMoreOpen(false); setTeacherOpen(true) }}>老师对我的了解</button>
                     <button onClick={() => { setMoreOpen(false); void runImport() }}>导入另一份课件</button>
                     <button disabled={busy !== null || !selectedDoc} onClick={() => { setMoreOpen(false); void createSession() }}>
-                      用当前文稿再开一门
+                      用这份课件再建一门课
                     </button>
                     <div className="study-menu-divider" />
-                    <p className="study-menu-label">收尾与整理</p>
-                    <button onClick={() => { setMoreOpen(false); setToolFocus(null); setMaterialsOpen(true) }}>学习总结与老师手记</button>
+                    <p className="study-menu-label">清理与删除</p>
+                    <button onClick={() => { setMoreOpen(false); setToolFocus(null); setMaterialsOpen(true) }}>看整份课件的学习总结</button>
                     <button onClick={() => (confirmAction === 'chat' ? void clearChat() : setConfirmAction('chat'))}>
-                      {confirmAction === 'chat' ? '再点一次，清除全部对话' : '清除对话记录'}
+                      {confirmAction === 'chat' ? '再点一次，清空和老师的全部对话' : '清空和老师的对话'}
                     </button>
                     <button onClick={() => (confirmAction === 'summary' ? void clearSummary() : setConfirmAction('summary'))}>
-                      {confirmAction === 'summary' ? '再点一次，清除总结' : '清除学习总结'}
+                      {confirmAction === 'summary' ? '再点一次，清空学习总结' : '清空学习总结'}
                     </button>
                     <button className="danger-text" onClick={() => (confirmAction === 'delete' ? void deleteSession() : setConfirmAction('delete'))}>
-                      {confirmAction === 'delete' ? '再点一次，删除这份课件课堂' : '删除这份课件课堂'}
+                      {confirmAction === 'delete' ? '再点一次，删除这份课件的课堂记录' : '删除这份课件的课堂记录'}
                     </button>
                   </div>
                 ) : null}
@@ -1502,7 +1503,7 @@ function LectureBlock({
               <div className="ws-message-main">
                 <div className="ws-message-head">
                   <b>老师</b>
-                  <span>{index === 0 ? '这一讲讲稿' : `接着讲 · 第 ${index + 1} 段`}</span>
+                  <span>{index === 0 ? '本讲讲稿' : `接着讲 · 第 ${index + 1} 段`}</span>
                 </div>
                 <div className="ws-bubble">
                   <p><MathText text={segment.explain} /></p>
@@ -1607,7 +1608,7 @@ function ContextRail({
   const topMemories = memories.slice(0, 2)
   const planRows: Array<{ key: string; label: string; meta: string; action: () => void; primary?: boolean }> = []
   if (dueCount > 0) {
-    planRows.push({ key: 'due', label: `复习 ${dueCount} 张到点卡片`, meta: '今天先回忆，再看答案', action: onOpenReview, primary: true })
+    planRows.push({ key: 'due', label: `今天该复习的 ${dueCount} 张卡`, meta: '先回忆，再看答案', action: onOpenReview, primary: true })
   }
   if (missCount > 0) {
     planRows.push({ key: 'miss', label: `重做 ${missCount} 道错题`, meta: '错过一次的，更要回炉', action: onOpenReview })
@@ -1625,8 +1626,8 @@ function ContextRail({
     <aside className={`ws-context${open ? ' open' : ''}`}>
       <header className="ws-context-head">
         <div className="ws-context-kicker">
-          <span>这一讲</span>
-          <span className="ws-pin">只看 · 跟着跳走</span>
+          <span>{FEATURE_LABELS.context}</span>
+          <span className="ws-pin">跟着左边选中的一讲</span>
           <button className="icon-btn ws-context-close" title="收起" onClick={onClose}>×</button>
         </div>
         <div className="ws-context-title">
@@ -1671,8 +1672,8 @@ function ContextRail({
 
       <details className="ws-actions-more">
         <summary>
-          <span>更多学习动作</span>
-          <small>总结 · 卡片 · 题测 · 错题 · 个性化</small>
+          <span>其他学习动作（可选）</span>
+          <small>需要时再用，不点也能正常听课</small>
           <i>⌄</i>
         </summary>
         <section className="ws-actions-card">
@@ -1683,17 +1684,17 @@ function ContextRail({
           <div className="ws-action-grid">
             <button disabled={busy || railBusy !== null} onClick={onReview}>
               <span>▤</span>
-              <b>{railBusy === 'review' ? '正在生成…' : '复习资料'}</b>
-              <small>总结 + 大纲</small>
+              <b>{railBusy === 'review' ? '正在生成…' : '总结与大纲'}</b>
+              <small>把这一讲压缩成复习页</small>
             </button>
             <button disabled={busy || railBusy !== null} onClick={onCards}>
               <span>▦</span>
-              <b>{railBusy === 'cards' ? '正在生成…' : '一键卡片'}</b>
+              <b>{railBusy === 'cards' ? '正在生成…' : '做成复习卡'}</b>
               <small>从这一讲的知识点</small>
             </button>
             <button disabled={busy || railBusy !== null} onClick={onQuiz}>
               <span>◫</span>
-              <b>题测</b>
+              <b>本讲小测</b>
               <small>{questionCount ? `${questionCount} 道题` : '先答后判'}</small>
             </button>
             <button disabled={busy || railBusy !== null} onClick={onOpenReview}>
@@ -1703,8 +1704,8 @@ function ContextRail({
             </button>
             <button className="wide" disabled={busy || railBusy !== null} onClick={onPersonalize}>
               <span>◎</span>
-              <b>个性化辅导</b>
-              <small>按你的学习习惯，先找最该补的一块</small>
+              <b>按我的弱点补</b>
+              <small>按学习习惯，先找最该补的一块</small>
             </button>
           </div>
         </section>
@@ -1734,7 +1735,7 @@ function ContextRail({
         {quizQuestions.length ? (
           <section className="ws-context-section ws-context-card ws-quiz-card">
             <div className="ws-card-head">
-              <h4>这一讲的题</h4>
+              <h4>本讲小测</h4>
               <span>{quizQuestions.length} 道 · 先答后判</span>
             </div>
             <ol className="ws-quiz-list">
@@ -1780,7 +1781,7 @@ function ContextRail({
 
         <section className="ws-context-section ws-context-card">
           <div className="ws-card-head">
-            <h4>这一讲的生成物</h4>
+            <h4>本讲生成的学习资料</h4>
             <span>{artifacts.length} 份</span>
           </div>
           {artifacts.length ? (
@@ -1792,7 +1793,7 @@ function ContextRail({
                 </button>
               ))}
             </div>
-          ) : <p className="quiet">问老师「总结这讲 / 考考我 / 找原文」，生成物会出现在这里。</p>}
+          ) : <p className="quiet">问老师「总结这讲 / 考考我 / 找原文」，学习资料会出现在这里。</p>}
         </section>
 
         <section className="ws-context-section ws-context-card">
@@ -1904,11 +1905,11 @@ function CourseMaterials({
   if (!open) return null
   const focused = toolFocus !== null
   const focusLabel = toolFocus === 'quiz' || toolFocus === 'quiz-grade'
-    ? '这一讲的题测'
+    ? '本讲小测'
     : toolFocus === 'summary'
-      ? '这一讲的总结'
+      ? '本讲总结'
       : toolFocus === 'outline'
-        ? '这一讲的复习大纲'
+        ? '本讲复习大纲'
         : toolFocus === 'search'
           ? '找原文'
           : toolFocus === 'teachback'
@@ -1932,10 +1933,10 @@ function CourseMaterials({
       <div className={`modal course-materials${focused ? ' focused' : ''}`}>
         <header>
           <div>
-            <h2>{focused ? focusLabel : '整份课件资料'}</h2>
+            <h2>{focused ? focusLabel : '整份课件总览'}</h2>
             <p className="quiet">
               {focused
-                ? '只放这一项，不把总览、老师手记和别的生成物一起摊开。'
+                ? '只放这一项，不把总览、老师手记和别的资料一起摊开。'
                 : '总览、学习分析、老师手记、老师工具和用量都放在这里。'}
             </p>
           </div>

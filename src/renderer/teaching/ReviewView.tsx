@@ -4,6 +4,7 @@ import type { StudyMissItem, StudySlideCitation } from '../../shared/study'
 import type { PageView, ReviewSettingsView } from '../../shared/contract'
 import { MathText } from '../components/MathText'
 import { PagePeek } from '../study/PagePeek'
+import { FEATURE_LABELS } from '../study/guide'
 
 type Notify = (tone: 'info' | 'bad', text: string) => void
 
@@ -263,21 +264,23 @@ export function ReviewView({
         <div>
           <div className="review-heading">
             <button className="ghost review-back" onClick={onBack}>← 回课堂</button>
-            <h2>复习</h2>
+            <h2>{FEATURE_LABELS.review}</h2>
           </div>
           <div className="meta">
-            {today ? <span className="chip">今天 听懂 {today.known}</span> : null}
+            {today ? <span className="chip">今天听懂 {today.known}</span> : null}
             {today ? <span className="chip">题 {today.quizzes}</span> : null}
-            <span className="chip">{due.length} 张到点</span>
+            <span className="chip">{due.length} 张今天要复习</span>
             <span className="chip">{totalMisses} 道错题</span>
           </div>
         </div>
         <div className="row">
-          <button className="primary" onClick={() => setEditor({ mode: 'create', origin: 'manual', front: '', back: '', suspended: false })}>新增卡片</button>
-          <button className="ghost" onClick={onExportCards}>导出卡片</button>
-          <button className="ghost" onClick={onExportMisses}>导出错题</button>
+          <button className="primary" onClick={() => setEditor({ mode: 'create', origin: 'manual', front: '', back: '', suspended: false })}>自己加一张卡</button>
+          <button className="ghost" onClick={onExportCards}>导出复习卡</button>
+          <button className="ghost" onClick={onExportMisses}>导出错题本</button>
         </div>
       </header>
+
+      <p className="quiet review-intro">这里不是重新上课：只复习今天该复习的卡片，和重做课堂里做错的题。</p>
 
       <section className="review-goal">
         <div className="row goal-line">
@@ -291,10 +294,10 @@ export function ReviewView({
         </p>
       </section>
 
-      {loading ? <p className="empty">正在看到点卡片…</p> : null}
+      {loading ? <p className="empty">正在看今天的复习卡…</p> : null}
 
       {!loading && !current ? (
-        <p className="empty">没有到点的卡片。听完一页讲解、做过题，这里会按五箱间隔来找你。</p>
+        <p className="empty">今天没有要复习的卡片。听完一讲、做过题，这里会按复习计划自动排。</p>
       ) : null}
 
       {current ? (
@@ -302,7 +305,7 @@ export function ReviewView({
           <p className="quiet">
             {current.lectureTitle}
             {' · '}
-            {current.origin === 'manual' ? '摘录/手动卡' : '拆课卡'}
+            {current.origin === 'manual' ? '自己加 / 摘录的卡' : '课堂里生成的卡'}
             {current.card.suspended ? ' · 已暂停' : ''}
           </p>
           {current.card.quote ? <p className="card-quote">原文：{current.card.quote}</p> : null}
@@ -329,17 +332,17 @@ export function ReviewView({
 
       <section>
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <h3>全部卡片 · {cards.length}</h3>
-          <button className="link-btn" onClick={() => setCardsOpen((open) => !open)}>{cardsOpen ? '收起' : '展开管理'}</button>
+          <h3>全部复习卡 · {cards.length}</h3>
+          <button className="link-btn" onClick={() => setCardsOpen((open) => !open)}>{cardsOpen ? '收起' : '管理这些卡'}</button>
         </div>
         {cardsOpen ? (
           <div className="card-list">
-            {cards.length === 0 ? <p className="quiet">还没有卡片。听完课、摘录一段，或者自己新增一张。</p> : null}
+            {cards.length === 0 ? <p className="quiet">还没有复习卡。听完课、摘录一段，或者自己加一张。</p> : null}
             {cards.map((card) => (
               <div key={`${card.origin}-${card.id}`} className={`card-row ${card.suspended ? 'suspended' : ''}`}>
                 <div>
                   <p className="card-row-front"><MathText text={card.front} /></p>
-                  <span className="quiet">{card.origin === 'manual' ? '手动卡' : '拆课卡'} · 第 {card.box} 箱 · {card.suspended ? '已暂停' : new Date(card.due).toLocaleDateString('zh-CN')}</span>
+                  <span className="quiet">{card.origin === 'manual' ? '自己加的' : '课堂生成'} · {card.suspended ? '已暂停' : `下次 ${new Date(card.due).toLocaleDateString('zh-CN')}`}</span>
                 </div>
                 <div className="row">
                   <button className="ghost" onClick={() => openEdit(card)}>编辑</button>

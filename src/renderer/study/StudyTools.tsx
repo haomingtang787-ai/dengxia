@@ -56,11 +56,11 @@ export function StudyTools({
   const focusOnly: StudyArtifact['kind'] | null = only === 'quiz-grade' ? 'quiz' : only
   const showArtifact = (kind: StudyArtifact['kind']) => !focusOnly || focusOnly === kind
   const focusTitle = focusOnly === 'quiz'
-    ? '这一讲的题测'
+    ? '本讲小测'
     : focusOnly === 'summary'
-      ? '这一讲的总结'
+      ? '本讲总结'
       : focusOnly === 'outline'
-        ? '这一讲的复习大纲'
+        ? '本讲复习大纲'
         : focusOnly === 'search'
           ? '找原文'
           : focusOnly === 'teachback'
@@ -68,7 +68,7 @@ export function StudyTools({
             : '老师工具'
   const focusHint = focusOnly === 'quiz'
     ? '先答，再交给老师判；可以只交已答的题，每题都能回原页。'
-    : '只放这一项，不把总览、老师手记和别的生成物一起摊开。'
+    : '只放这一项，不把总览、老师手记和别的学习资料一起摊开。'
   const summary = latest('summary', currentScope) ?? latest('summary')
   const outline = latest('outline', currentScope) ?? latest('outline')
   const search = latest('search')
@@ -100,7 +100,7 @@ export function StudyTools({
           <h3>{focusTitle}</h3>
           <p>{focusOnly ? focusHint : '可以直接点，也可以直接在对话框里说“总结这一讲”“考考我”；右栏不重复放按钮墙。'}</p>
         </div>
-        <span className="chip">{detail.artifacts?.length ?? 0} 份生成物</span>
+        <span className="chip">{detail.artifacts?.length ?? 0} 份学习资料</span>
       </div>
 
       {!focusOnly ? (
@@ -161,9 +161,9 @@ export function StudyTools({
         {showArtifact('quiz') && quiz ? <QuizArtifact artifact={quiz} answers={answers} setAnswers={setAnswers} onSubmit={submitQuiz} blocked={blocked} pages={pages} onOpenPage={onOpenPage} /> : null}
         {showArtifact('teachback') && teachbackArtifact ? <TeachbackArtifact artifact={teachbackArtifact} /> : null}
         {!focusOnly && !summary && !outline && !search && !quiz && !teachbackArtifact ? (
-          <p className="empty">还没有生成物。点“考考我”或“总结这一讲”，结果会落在课程资料里。</p>
+          <p className="empty">还没有学习资料。点“考考我”或“总结这一讲”，结果会落在课程资料里。</p>
         ) : null}
-        {focusOnly && !quiz && focusOnly === 'quiz' ? <p className="empty">题测还没生成；点右栏“题测”开始出题。</p> : null}
+        {focusOnly && !quiz && focusOnly === 'quiz' ? <p className="empty">还没出题；点右栏“本讲小测”开始。</p> : null}
       </div>
     </section>
   )

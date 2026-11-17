@@ -83,10 +83,14 @@ function createWindow(library: DocumentService): BrowserWindow {
   })
   win.webContents.on('will-attach-webview', (event) => event.preventDefault())
   const smokeView = process.env.DESK_SMOKE_VIEW
-  const query = smokeView === 'class' || smokeView === 'review' ? { view: smokeView } : undefined
+  const smokeHelp = process.env.DESK_SMOKE_HELP
+  const queryParams = new URLSearchParams()
+  if (smokeView === 'class' || smokeView === 'review') queryParams.set('view', smokeView)
+  if (smokeHelp) queryParams.set('help', smokeHelp)
+  const query = queryParams.size ? Object.fromEntries(queryParams) : undefined
   if (process.env.ELECTRON_RENDERER_URL) {
     const base = process.env.ELECTRON_RENDERER_URL
-    void win.loadURL(query ? `${base}?view=${smokeView}` : base)
+    void win.loadURL(query ? `${base}?${queryParams.toString()}` : base)
   } else {
     void win.loadFile(path.join(here, '../renderer/index.html'), query ? { query } : undefined)
   }
