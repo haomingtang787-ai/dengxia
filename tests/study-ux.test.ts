@@ -18,7 +18,7 @@ function doc(status: string, job: DocumentListItem['job'] = null): DocumentListI
 }
 
 describe('课堂体验 helper', () => {
-  it('文档还在解析时不认为可建课；job 结束后仍以 ready 为准', () => {
+  it('文档还在解析时不认为可建课；job 结束后再看文稿状态', () => {
     expect(isDocumentReady(doc('parsing', {
       jobId: 'j', state: 'running', stage: 'parse', completed: 12, total: 147,
     }))).toBe(false)
@@ -29,6 +29,17 @@ describe('课堂体验 helper', () => {
     expect(isDocumentReady(doc('parsing'))).toBe(false)
     expect(isDocumentReady(doc('ready', {
       jobId: 'j', state: 'failed', stage: 'parse', completed: 0, total: 147,
+    }))).toBe(false)
+  })
+
+  it('partial 文稿也能建课，失败任务仍然拒绝', () => {
+    const partialJob: DocumentListItem['job'] = {
+      jobId: 'j', state: 'partial', stage: 'done', completed: 221, total: 221,
+    }
+    expect(isDocumentReady(doc('partial', partialJob))).toBe(true)
+    expect(isDocumentReady(doc('partial'))).toBe(true)
+    expect(isDocumentReady(doc('partial', {
+      jobId: 'j', state: 'failed', stage: 'done', completed: 0, total: 221,
     }))).toBe(false)
   })
 

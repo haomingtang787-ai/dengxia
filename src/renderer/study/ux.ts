@@ -3,6 +3,8 @@ import type { DocumentListItem } from '../../shared/contract'
 /**
  * 课程创建依赖已经落好的页与文本块；解析没完成时抢跑只会得到“没有可读内容”。
  * job 的终态优先于列表里的 status，避免旧列表把失败任务当成可建课。
+ * partial 只表示还有待读图/待复核项，正文与页面已经落库；建课时会继续做视觉读图，
+ * 不能把它当成“还在解析”而挡住自动建课。
  */
 export function isDocumentReady(item: DocumentListItem): boolean {
   const job = item.job
@@ -10,7 +12,7 @@ export function isDocumentReady(item: DocumentListItem): boolean {
     if (job.state === 'queued' || job.state === 'running') return false
     if (job.state !== 'succeeded' && job.state !== 'partial') return false
   }
-  return item.status === 'ready'
+  return item.status === 'ready' || item.status === 'partial'
 }
 
 /** 首页等待态只说解析进度，不把“还没可读内容”当成建课失败。 */
