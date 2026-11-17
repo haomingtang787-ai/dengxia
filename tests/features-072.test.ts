@@ -157,7 +157,7 @@ describe('0.7.2 usage 解析', () => {
 
 describe('0.7.2 存储与会话聚合', () => {
   it('schema 升到 13，ai_usage 能区分真实回报与估算', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(13)
+    expect(CURRENT_SCHEMA_VERSION).toBe(14)
     const columns = db.all<{ name: string }>('PRAGMA table_info(ai_usage)').map((row) => row.name)
     expect(columns).toContain('cache_miss_tokens')
     expect(columns).toContain('reasoning_tokens')

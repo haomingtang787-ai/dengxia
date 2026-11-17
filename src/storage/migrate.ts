@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { nowIso } from '../domain/ids'
 import { searchIndexText } from '../shared/search'
 import { AppDatabase } from './database'
@@ -406,7 +407,7 @@ function backfillSearch(db: AppDatabase): void {
 }
 
 /** 恢复旧备份时用它判断备份 schema 是否比当前应用新。 */
-export const CURRENT_SCHEMA_VERSION = 13
+export const CURRENT_SCHEMA_VERSION = 14
 
 const COST_SCHEMA = `
 CREATE TABLE material_digests (
@@ -503,6 +504,47 @@ CREATE TABLE study_artifacts (
 
 CREATE INDEX idx_study_artifacts_session ON study_artifacts(session_id, updated_at DESC);
 `
+
+const COURSE_SCHEMA = `
+CREATE TABLE study_courses (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`
+
+/**
+ * 0.7.3：旧课堂按 subject 收成课程。空 subject 归“未分类”，同名合并。
+ * 迁移和测试都直接调它，保证“旧库不丢课”。
+ */
+export function backfillStudyCourses(db: AppDatabase): void {
+  const rows = db.all<{ subject: string }>(
+    'SELECT DISTINCT COALESCE(subject, \'\') AS subject FROM study_sessions WHERE course_id IS NULL',
+  )
+  for (const row of rows) {
+    const subject = String(row.subject ?? '').trim()
+    const name = subject || '未分类'
+    let course = db.get<{ id: string }>('SELECT id FROM study_courses WHERE name = ?', name)
+    if (!course) {
+      const max = db.get<{ max: number }>('SELECT COALESCE(MAX(sort_order), -1) AS max FROM study_courses')?.max ?? -1
+      const id = randomUUID()
+      const at = nowIso()
+      db.run(
+        `INSERT INTO study_courses(id, name, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        id, name, Number(max) + 1, at, at,
+      )
+      course = { id }
+    }
+    db.run(
+      `UPDATE study_sessions SET course_id = ?
+       WHERE course_id IS NULL AND COALESCE(subject, '') = ?`,
+      course.id, subject,
+    )
+  }
+}
 
 function hasVersion(db: AppDatabase, version: number): boolean {  return Boolean(db.get<{ version: number }>('SELECT version FROM schema_migrations WHERE version = ?', version))
 }
@@ -624,6 +666,18 @@ export function migrate(db: AppDatabase): void {
       db.exec('UPDATE ai_usage SET cache_miss_tokens = MAX(0, prompt_tokens - cached_tokens)')
       db.exec('CREATE INDEX idx_ai_usage_reported ON ai_usage(provider_reported)')
       db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 13, nowIso())
+    })
+  }
+  if (!hasVersion(db, 14)) {
+    db.transaction(() => {
+      // 0.7.3：课程是左栏真实实体；一份课件仍是一个会话，讲只做目录和消息分隔。
+      db.exec(COURSE_SCHEMA)
+      db.exec('ALTER TABLE study_sessions ADD COLUMN course_id TEXT NULL REFERENCES study_courses(id) ON DELETE CASCADE')
+      db.exec('CREATE INDEX idx_study_sessions_course ON study_sessions(course_id, created_at DESC)')
+      // 老师回答旁挂的整页出处；旧消息保持空数组，不回溯伪造。
+      db.exec('ALTER TABLE study_messages ADD COLUMN citations_json TEXT NOT NULL DEFAULT \'[]\'')
+      backfillStudyCourses(db)
+      db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 14, nowIso())
     })
   }
 }

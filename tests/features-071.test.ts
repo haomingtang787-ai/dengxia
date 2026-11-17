@@ -202,7 +202,7 @@ describe('0.7.1 工具与落点', () => {
   })
 
   it('study_artifacts：同 kind/scope 更新不重复，删除课程级联删除 artifact', () => {
-    expect(CURRENT_SCHEMA_VERSION).toBe(13)
+    expect(CURRENT_SCHEMA_VERSION).toBe(14)
     const store = new StudyStore(db)
     const first: StudyArtifactRow = {
       id: randomUUID(), session_id: sessionId, kind: 'outline', scope: 'course',

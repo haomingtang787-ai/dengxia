@@ -21,13 +21,29 @@ export type StudyUnit = {
 
 export type StudyMessageRole = 'user' | 'assistant'
 
+/** 老师回答旁挂的整页出处：不裁图，直接用页图 + bbox 高亮。 */
+export type StudySlideCitation = {
+  pageNumber: number
+  pageId: string | null
+  quote: string
+  blockId: string | null
+  bbox: [number, number, number, number] | null
+}
+
 export type StudyMessage = {
   id: string
   sessionId: string
   role: StudyMessageRole
   unitOrdinal: number | null
   content: string
+  citations: StudySlideCitation[]
   createdAt: string
+}
+
+/** 当前讲送给模型的讲义页摘要；放在稳定前缀里，别每轮拼接。 */
+export type StudySlideBrief = {
+  pages: number[]
+  excerpts: Array<{ page: number; text: string }>
 }
 
 /** 学生对「停一下」问题的作答。它是学习总结判断掌握程度的直接证据。 */
@@ -159,6 +175,7 @@ export type StudyUsageAudit = {
 export type StudySessionListItem = {
   sessionId: string
   documentVersionId: string
+  courseId: string | null
   title: string
   subject: string
   sourceName: string
@@ -170,6 +187,32 @@ export type StudySessionListItem = {
 }
 
 export type StudySessionList = { items: StudySessionListItem[] }
+
+/** 左栏只需要的讲目录，不带整段讲稿，避免一开页把所有课都读进来。 */
+export type StudyCourseUnit = {
+  id: string
+  ordinal: number
+  title: string
+  minutes: number
+}
+
+export type StudyCourseSession = StudySessionListItem & {
+  units: StudyCourseUnit[]
+}
+
+export type StudyCourse = {
+  courseId: string
+  name: string
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type StudyCourseTreeItem = StudyCourse & {
+  sessions: StudyCourseSession[]
+}
+
+export type StudyCourseTree = { items: StudyCourseTreeItem[] }
 
 export type StudySessionDetail = StudySessionListItem & {
   overview: string

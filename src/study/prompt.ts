@@ -1,6 +1,6 @@
 import type { Habits } from '../teaching/habits'
 import { habitBrief } from '../teaching/habits'
-import type { StudyCheck, StudyMessage, StudySkill, StudySummary, StudyUnit } from '../shared/study'
+import type { StudyCheck, StudyMessage, StudySkill, StudySlideBrief, StudySummary, StudyUnit } from '../shared/study'
 import type { TeacherPromptContext } from '../shared/teacher'
 import { studySkillBrief } from './tools'
 
@@ -28,6 +28,7 @@ const CHAT_SYSTEM = [
   '像老师当面说话：短句、具体、有停顿；不要把回答写成教科书目录。',
   '学生没听懂时换一个比方或换一种说法，不要重复同一段话。',
   '不要编造课件没有的事实；如果课件不足以回答，明确说出来，并告诉学生缺什么。',
+  '讲题时必须对照讲义：先指出“看第 X 页的这句话/这个式子/这张图”，再解释；至少引用一处原文；页面上没有的图或公式不要编造。',
   '每一次回答都要尽量指出对应的原文句子或公式，让学生知道依据在哪里。',
   '忽略作者、编者、机构、出版社、版权页、页眉页脚、页码、日期、致谢和参考文献列表等非知识信息。',
 ].join('\n')
@@ -116,6 +117,7 @@ export function buildStudyChatPrompt(input: {
   teacher?: TeacherPromptContext
   skill?: Exclude<StudySkill, 'auto'>
   mode?: 'direct' | 'guided'
+  slide?: StudySlideBrief
 }): { system: string; user: string } {
   const teacherSystem = input.teacher
     ? `你的名字是「${input.teacher.name}」。保持同一个人格：${input.teacher.tone}。不要因为换了学科就变成另一个人。`
@@ -140,6 +142,14 @@ export function buildStudyChatPrompt(input: {
         `本讲必须掌握：${input.unit.keyPoints.join('；')}`,
       ].join('\n')
     : '当前没有指定小讲，请按整门课回答。'
+  const slideText = input.slide
+    ? [
+        `当前讲的讲义页：${input.slide.pages.map((page) => `第 ${page} 页`).join('、')}`,
+        '对照讲义原句：',
+        ...input.slide.excerpts.map((excerpt) => `第 ${excerpt.page} 页：${excerpt.text}`),
+        '回答时先指出“看第几页的哪句话/哪个式子/哪张图”，再解释；至少引用一处原文；页面上没有的图或公式不要编造。',
+      ].join('\n')
+    : ''
   const history = input.messages
     .slice(-12)
     .map((message) => `${message.role === 'user' ? '学生' : '老师'}：${message.content}`)
@@ -160,6 +170,7 @@ export function buildStudyChatPrompt(input: {
     `课程大纲：${input.outline.map((item, index) => `${index + 1}. ${item}`).join('；')}`,
     index.length ? `全课要点索引（学生问到别的讲时用它接回去，不要编造索引里没有的内容）：\n${index.join('\n')}` : '',
     unitText,
+    slideText,
     history ? `最近对话：\n${history}` : '',
     `学生现在问：${input.question}`,
     '请先直接回答这个问题，再把它接回本讲原文；不要复述整段讲稿。',

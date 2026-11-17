@@ -71,8 +71,8 @@ export function StudyTools({
     <section className="study-tools">
       <div className="study-tools-head">
         <div>
-          <h3>老师能做什么</h3>
-          <p>这些不是按钮墙：点一下是入口，平时直接跟老师说“总结这一讲”“考考我”也行。</p>
+          <h3>老师工具</h3>
+          <p>可以直接点，也可以直接在对话框里说“总结这一讲”“考考我”；右栏不重复放按钮墙。</p>
         </div>
         <span className="chip">{detail.artifacts?.length ?? 0} 份生成物</span>
       </div>

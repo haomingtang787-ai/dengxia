@@ -8,6 +8,10 @@ import { fail, ok, type Result } from '../shared/contract'
 import type {
   StudyArtifact,
   StudyCheck,
+  StudyCourse,
+  StudyCourseSession,
+  StudyCourseTree,
+  StudyCourseTreeItem,
   StudyMessage,
   StudyMode,
   StudyQuizAnswer,
@@ -16,6 +20,8 @@ import type {
   StudySessionList,
   StudyProgress,
   StudySkill,
+  StudySlideBrief,
+  StudySlideCitation,
   StudySummary,
   StudyToolKind,
   StudyUnit,
@@ -100,6 +106,13 @@ type ReadingRow = {
   text: string
 }
 
+type CitationPage = {
+  pageId: string
+  pageNumber: number
+  text: string
+  blocks: Array<{ id: string; text: string; bbox: [number, number, number, number] | null }>
+}
+
 type UsageScope = { sessionId: string | null; documentVersionId: string | null }
 
 export class StudyService {
@@ -113,6 +126,79 @@ export class StudyService {
     const requestId = randomUUID()
     try {
       return ok(requestId, { items: this.store.listSessions() })
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
+  courses(): Result<StudyCourseTree> {
+    const requestId = randomUUID()
+    try {
+      return ok(requestId, this.courseTree())
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
+  createCourse(body: unknown): Result<StudyCourseTree> {
+    const requestId = randomUUID()
+    try {
+      const name = this.courseName(body)
+      if (this.store.findCourseByName(name)) throw new ArgumentError('已经有同名课程。')
+      const at = nowIso()
+      this.store.createCourse({
+        courseId: randomUUID(),
+        name,
+        sortOrder: this.nextCourseSortOrder(),
+        createdAt: at,
+        updatedAt: at,
+      })
+      return ok(requestId, this.courseTree())
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
+  renameCourse(body: unknown): Result<StudyCourseTree> {
+    const requestId = randomUUID()
+    try {
+      const courseId = this.courseId(body)
+      const course = this.store.findCourse(courseId)
+      if (!course) throw new ArgumentError('找不到这门课程。')
+      const name = this.courseName(body)
+      const sameName = this.store.findCourseByName(name)
+      if (sameName && sameName.courseId !== courseId) throw new ArgumentError('已经有同名课程。')
+      this.store.renameCourse(courseId, name, nowIso())
+      return ok(requestId, this.courseTree())
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
+  deleteCourse(body: unknown): Result<StudyCourseTree> {
+    const requestId = randomUUID()
+    try {
+      const courseId = this.courseId(body)
+      if (!this.store.findCourse(courseId)) throw new ArgumentError('找不到这门课程。')
+      this.store.deleteCourse(courseId)
+      return ok(requestId, this.courseTree())
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
+  reorderCourses(body: unknown): Result<StudyCourseTree> {
+    const requestId = randomUUID()
+    try {
+      if (!isPlainObject(body) || !Array.isArray(body.ids)) throw new ArgumentError('请求格式不正确。')
+      const ids = body.ids.map((id) => typeof id === 'string' ? id.trim() : '')
+      if (ids.length === 0 || ids.length > 200 || ids.some((id) => !isUuid(id))) {
+        throw new ArgumentError('课程排序列表不完整。')
+      }
+      const known = new Set(this.store.listCourseRows().map((course) => course.courseId))
+      if (ids.some((id) => !known.has(id))) throw new ArgumentError('排序里有不存在的课程。')
+      this.store.reorderCourses(ids, nowIso())
+      return ok(requestId, this.courseTree())
     } catch (error) {
       return this.failure(requestId, error)
     }
@@ -223,10 +309,12 @@ export class StudyService {
         warnings.push(`有 ${grounded.ungrounded} 处讲稿引用的「原文」没能在课件里逐字找到，已保留讲解，但那一句是模型转述，请对照原件。`)
       }
       const opening = mergeOpening(plan.opening, units)
+      const courseId = this.resolveCourse(input.courseId, plan.subject)
       const session: StudySessionRow = {
         id: sessionId,
         request_id: input.requestId,
         document_version_id: input.documentVersionId,
+        course_id: courseId,
         title: plan.title,
         subject: plan.subject,
         source_name: meta.displayName,
@@ -259,8 +347,9 @@ export class StudyService {
           id: randomUUID(),
           session_id: sessionId,
           role: 'assistant',
-          unit_ordinal: 0,
+          unit_ordinal: null,
           content: opening,
+          citations_json: '[]',
           created_at: timestamp,
         },
       })
@@ -284,6 +373,7 @@ export class StudyService {
       const unit = input.unitOrdinal == null
         ? units[0] ?? null
         : units.find((item) => item.ordinal === input.unitOrdinal) ?? null
+      const pages = this.citationPages(session.document_version_id)
       // 说「找原文 / 总结这一讲 / 考考我」时先执行一次性工具，不再让模型陪聊一遍。
       const intent = routeStudyToolIntent(input.content)
       if (intent) {
@@ -298,6 +388,7 @@ export class StudyService {
         const artifact = toolResult.data.artifacts.find((item) => item.kind === intent)
         const timestamp = nowIso()
         const reply = this.toolChatReply(intent, artifact, unit)
+        const citations = unit ? this.citationsForUnit(unit, pages) : []
         this.options.db.transaction(() => {
           this.store.appendMessage({
             id: randomUUID(),
@@ -305,6 +396,7 @@ export class StudyService {
             role: 'user',
             unit_ordinal: unit?.ordinal ?? input.unitOrdinal ?? null,
             content: input.content,
+            citations_json: '[]',
             created_at: timestamp,
           })
           this.store.appendMessage({
@@ -313,6 +405,7 @@ export class StudyService {
             role: 'assistant',
             unit_ordinal: unit?.ordinal ?? input.unitOrdinal ?? null,
             content: reply,
+            citations_json: JSON.stringify(citations),
             created_at: timestamp,
           })
         })
@@ -330,6 +423,7 @@ export class StudyService {
         teacher: this.options.teacher?.context(session.subject, unit?.title ?? ''),
         skill: routeStudySkill(input.content, input.skill),
         mode: input.mode,
+        slide: unit ? this.slideBriefForUnit(unit, pages) : undefined,
       })
       const answer = (await this.client({
         sessionId: session.id,
@@ -337,12 +431,14 @@ export class StudyService {
       }).complete(prompt.system, prompt.user, 3000, 'disabled', 'chat')).trim()
       if (!answer) throw new AiError('AI_FAILED', '模型没有返回讲解。')
       const timestamp = nowIso()
+      const citations = unit ? this.citationsForAnswer(unit, answer, pages) : []
       const userMessage: StudyMessageRow = {
         id: randomUUID(),
         session_id: session.id,
         role: 'user',
         unit_ordinal: unit?.ordinal ?? input.unitOrdinal ?? null,
         content: input.content,
+        citations_json: '[]',
         created_at: timestamp,
       }
       const assistantMessage: StudyMessageRow = {
@@ -351,6 +447,7 @@ export class StudyService {
         role: 'assistant',
         unit_ordinal: unit?.ordinal ?? input.unitOrdinal ?? null,
         content: answer,
+        citations_json: JSON.stringify(citations),
         created_at: timestamp,
       }
       this.options.db.transaction(() => {
@@ -596,8 +693,8 @@ export class StudyService {
     }
   }
 
-  /** 删除整门课。 */
-  deleteCourse(body: unknown): Result<StudySessionList> {
+  /** 删除整份课件会话。 */
+  deleteSession(body: unknown): Result<StudySessionList> {
     const requestId = randomUUID()
     try {
       const sessionId = this.sessionId(body)
@@ -763,6 +860,163 @@ export class StudyService {
     }
   }
 
+  private courseTree(): StudyCourseTree {
+    const courses = this.store.listCourseRows()
+    const sessions = this.store.listSessions()
+    const items: StudyCourseTreeItem[] = courses.map((course) => {
+      const sessionItems: StudyCourseSession[] = sessions
+        .filter((session) => session.courseId === course.courseId)
+        .map((session) => ({
+          ...session,
+          units: this.store.listUnits(session.sessionId).map((unit) => ({
+            id: unit.id,
+            ordinal: Number(unit.ordinal),
+            title: unit.title,
+            minutes: Number(unit.minutes),
+          })),
+        }))
+      return { ...course, sessions: sessionItems }
+    })
+    return { items }
+  }
+
+  private nextCourseSortOrder(): number {
+    const rows = this.store.listCourseRows()
+    return rows.reduce((max, row) => Math.max(max, row.sortOrder), -1) + 1
+  }
+
+  private resolveCourse(courseId: string | null, subject: string): string {
+    if (courseId) {
+      const existing = this.store.findCourse(courseId)
+      if (!existing) throw new ArgumentError('找不到这门课程。')
+      return existing.courseId
+    }
+    const name = subject.trim() || '未分类'
+    const existing = this.store.findCourseByName(name)
+    if (existing) return existing.courseId
+    const at = nowIso()
+    const course: StudyCourse = {
+      courseId: randomUUID(),
+      name,
+      sortOrder: this.nextCourseSortOrder(),
+      createdAt: at,
+      updatedAt: at,
+    }
+    this.store.createCourse(course)
+    return course.courseId
+  }
+
+  private citationPages(versionId: string): CitationPage[] {
+    const pages = this.options.db.all<{ id: string; ordinal: number }>(
+      'SELECT id, ordinal FROM pages WHERE document_version_id = ? ORDER BY ordinal ASC',
+      versionId,
+    )
+    const blocks = this.options.db.all<{
+      id: string
+      page_id: string
+      text: string
+      locator_json: string
+    }>(
+      `SELECT id, page_id, text, locator_json FROM blocks
+       WHERE document_version_id = ? AND page_id IS NOT NULL
+       ORDER BY page_id ASC, ordinal ASC`,
+      versionId,
+    )
+    const byPage = new Map<string, CitationPage>()
+    for (const page of pages) {
+      byPage.set(page.id, {
+        pageId: page.id,
+        pageNumber: Number(page.ordinal) + 1,
+        text: '',
+        blocks: [],
+      })
+    }
+    for (const block of blocks) {
+      const page = byPage.get(block.page_id)
+      if (!page) continue
+      page.text += `${block.text}\n`
+      page.blocks.push({
+        id: block.id,
+        text: block.text,
+        bbox: parseBbox(block.locator_json),
+      })
+    }
+    return [...byPage.values()].filter((page) => page.text.trim().length > 0)
+  }
+
+  private pagesForUnit(unit: StudyUnit, pages: CitationPage[]): CitationPage[] {
+    const found = new Set<number>()
+    const quotes = [unit.source, ...unit.segments.map((segment) => segment.source)]
+    for (const quote of quotes) {
+      const range = pageRange(quote)
+      if (range) {
+        for (let page = range[0]; page <= range[1]; page += 1) found.add(page)
+      }
+      const normalized = normalizeText(quote)
+      if (normalized.length < 6) continue
+      const page = pages.find((item) => normalizeText(item.text).includes(normalized))
+      if (page) found.add(page.pageNumber)
+    }
+    return pages.filter((page) => found.has(page.pageNumber)).slice(0, 4)
+  }
+
+  private slideBriefForUnit(unit: StudyUnit, pages: CitationPage[]): StudySlideBrief | undefined {
+    const unitPages = this.pagesForUnit(unit, pages)
+    if (unitPages.length === 0) return undefined
+    return {
+      pages: unitPages.map((page) => page.pageNumber),
+      excerpts: unitPages.map((page) => ({
+        page: page.pageNumber,
+        text: page.text.trim().slice(0, 900),
+      })),
+    }
+  }
+
+  private citationsForUnit(unit: StudyUnit, pages: CitationPage[]): StudySlideCitation[] {
+    return this.pagesForUnit(unit, pages)
+      .slice(0, 3)
+      .map((page) => this.citationOf(page, unit))
+  }
+
+  private citationsForAnswer(unit: StudyUnit, answer: string, pages: CitationPage[]): StudySlideCitation[] {
+    const mentioned = pageMentions(answer)
+    const explicit = pages.filter((page) => mentioned.includes(page.pageNumber))
+    const candidates = explicit.length > 0 ? explicit : this.pagesForUnit(unit, pages)
+    return candidates.slice(0, 3).map((page) => this.citationOf(page, unit))
+  }
+
+  private citationOf(page: CitationPage, unit: StudyUnit): StudySlideCitation {
+    const quote = quoteForPage(page, unit)
+    const block = page.blocks.find((item) => {
+      const blockText = normalizeText(item.text)
+      const quoteText = normalizeText(quote)
+      return blockText.includes(quoteText) || quoteText.includes(blockText)
+    })
+    return {
+      pageNumber: page.pageNumber,
+      pageId: page.pageId,
+      quote,
+      blockId: block?.id ?? null,
+      // 找不到逐字匹配就不画框：扫描件 OCR 文本会和原页对不上，宁可不标，也不把框放错位置。
+      bbox: block?.bbox ?? null,
+    }
+  }
+
+  private courseName(body: unknown): string {
+    if (!isPlainObject(body)) throw new ArgumentError('请求格式不正确。')
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    if (!name) throw new ArgumentError('先给课程起一个名字。')
+    if (name.length > 60) throw new ArgumentError('课程名最多 60 个字。')
+    return name
+  }
+
+  private courseId(body: unknown): string {
+    if (!isPlainObject(body)) throw new ArgumentError('请求格式不正确。')
+    const courseId = typeof body.courseId === 'string' ? body.courseId.trim() : ''
+    if (!isUuid(courseId)) throw new ArgumentError('courseId 不是有效的课程。')
+    return courseId
+  }
+
   private detail(sessionId: string): StudySessionDetail {
     const session = this.requireSession(sessionId)
     const units = this.units(sessionId)
@@ -771,6 +1025,7 @@ export class StudyService {
     return {
       sessionId: session.id,
       documentVersionId: session.document_version_id,
+      courseId: session.course_id ?? null,
       title: session.title,
       subject: session.subject,
       sourceName: session.source_name,
@@ -956,7 +1211,13 @@ export class StudyService {
     return { displayName: row.display_name, title: row.display_name }
   }
 
-  private createBody(body: unknown): { requestId: string; documentVersionId: string; title: string; subject: string } {
+  private createBody(body: unknown): {
+    requestId: string
+    documentVersionId: string
+    title: string
+    subject: string
+    courseId: string | null
+  } {
     if (!isPlainObject(body)) throw new ArgumentError('请求格式不正确。')
     const requestId = typeof body.requestId === 'string' ? body.requestId.trim() : ''
     if (!requestId || requestId.length > 80) throw new ArgumentError('请求缺少有效的 requestId。')
@@ -964,7 +1225,9 @@ export class StudyService {
     if (!isUuid(documentVersionId)) throw new ArgumentError('documentVersionId 不是有效的文稿版本。')
     const title = typeof body.title === 'string' ? body.title.trim().slice(0, 120) : ''
     const subject = typeof body.subject === 'string' ? body.subject.trim().slice(0, 60) : ''
-    return { requestId, documentVersionId, title, subject }
+    const rawCourseId = typeof body.courseId === 'string' ? body.courseId.trim() : ''
+    if (rawCourseId && !isUuid(rawCourseId)) throw new ArgumentError('courseId 不是有效的课程。')
+    return { requestId, documentVersionId, title, subject, courseId: rawCourseId || null }
   }
 
   private sendBody(body: unknown): { sessionId: string; content: string; unitOrdinal: number | null; mode: StudyMode; skill: StudySkill } {
@@ -1210,6 +1473,66 @@ function unitFromRow(row: StudyUnitRow): StudyUnit {
     keyPoints: parseStringList(row.key_points_json),
     segments: parseSegments(row.segments_json),
   }
+}
+
+function parseBbox(raw: string): [number, number, number, number] | null {
+  try {
+    const locator = JSON.parse(raw) as { bbox?: unknown }
+    if (!Array.isArray(locator.bbox) || locator.bbox.length !== 4) return null
+    if (!locator.bbox.every((value) => typeof value === 'number' && Number.isFinite(value))) return null
+    return locator.bbox as [number, number, number, number]
+  } catch {
+    return null
+  }
+}
+
+function pageRange(text: string): [number, number] | null {
+  const match = /第\s*(\d{1,3})(?:\s*(?:-|–|—|~|至)\s*(\d{1,3}))?\s*页/.exec(text)
+  if (!match) return null
+  const start = Number(match[1])
+  const end = Number(match[2] ?? match[1])
+  if (start < 1 || end < start || end > 999) return null
+  return [start, end]
+}
+
+function normalizeText(text: string): string {
+  return text
+    .replace(/\s+/g, '')
+    .replace(/[，。、；：！？""''（）()\[\]【】《》·—–~]/g, '')
+    .toLowerCase()
+}
+
+function pageMentions(text: string): number[] {
+  const found = new Set<number>()
+  const patterns = [
+    /(?:第\s*)?(\d{1,3})\s*页/g,
+    /\[\s*p\.?\s*(\d{1,3})\s*\]/gi,
+    /\bp\.\s*(\d{1,3})\b/gi,
+  ]
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const number = Number(match[1])
+      if (number > 0) found.add(number)
+    }
+  }
+  return [...found]
+}
+
+function quoteForPage(page: CitationPage, unit: StudyUnit): string {
+  // 扫描版 PDF 的 OCR 文本可能是乱码；这一页正好是当前讲的出处页时，
+  // 用老师讲稿里已经校对过的原句，不把 OCR 噪声当成“原文”展示给学生。
+  const pageRef = /第\s*(\d+)\s*页/.exec(unit.source)
+  if (pageRef && Number(pageRef[1]) === page.pageNumber) {
+    const first = unit.segments[0]?.source.trim()
+    if (first) return first.slice(0, 240)
+    const afterColon = unit.source.split(/[：:]/)[1]?.trim()
+    if (afterColon) return afterColon.slice(0, 240)
+  }
+  const segment = unit.segments.find((item) => normalizeText(page.text).includes(normalizeText(item.source)))
+  if (segment) return segment.source.slice(0, 240)
+  const text = page.text.replace(/\s+/g, ' ').trim()
+  const sentence = text.split(/(?<=[。！？])/)[0] ?? text
+  return sentence.slice(0, 180)
 }
 
 function parseSegments(raw: string): StudyUnit['segments'] {

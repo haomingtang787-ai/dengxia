@@ -144,9 +144,18 @@ const desk = {
       invoke<import('../shared/research').ResearchResult>(IpcChannel.researchVerify, body),
   },
   study: {
-    create: (body: { requestId: string; documentVersionId: string; title?: string; subject?: string }) =>
+    create: (body: { requestId: string; documentVersionId: string; title?: string; subject?: string; courseId?: string | null }) =>
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyCreate, body),
     list: () => invoke<import('../shared/study').StudySessionList>(IpcChannel.studyList, {}),
+    courses: () => invoke<import('../shared/study').StudyCourseTree>(IpcChannel.studyCourses, {}),
+    courseCreate: (body: { name: string }) =>
+      invoke<import('../shared/study').StudyCourseTree>(IpcChannel.studyCourseCreate, body),
+    courseRename: (body: { courseId: string; name: string }) =>
+      invoke<import('../shared/study').StudyCourseTree>(IpcChannel.studyCourseRename, body),
+    courseDelete: (body: { courseId: string }) =>
+      invoke<import('../shared/study').StudyCourseTree>(IpcChannel.studyCourseDelete, body),
+    courseReorder: (body: { ids: string[] }) =>
+      invoke<import('../shared/study').StudyCourseTree>(IpcChannel.studyCourseReorder, body),
     get: (body: { sessionId: string }) =>
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyGet, body),
     send: (body: { sessionId: string; content: string; unitOrdinal?: number | null; mode?: import('../shared/study').StudyMode; skill?: import('../shared/study').StudySkill }) =>

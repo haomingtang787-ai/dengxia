@@ -1,10 +1,20 @@
 import type { AppDatabase } from './database'
-import type { StudyArtifactKind, StudyMessage, StudyMessageRole, StudySessionListItem, StudyStatus, StudySummary } from '../shared/study'
+import type {
+  StudyArtifactKind,
+  StudyCourse,
+  StudyMessage,
+  StudyMessageRole,
+  StudySessionListItem,
+  StudySlideCitation,
+  StudyStatus,
+  StudySummary,
+} from '../shared/study'
 
 export type StudySessionRow = {
   id: string
   request_id: string
   document_version_id: string
+  course_id: string | null
   title: string
   subject: string
   source_name: string
@@ -18,6 +28,14 @@ export type StudySessionRow = {
   status: StudyStatus
   summary_json: string
   teacher_snapshot_json: string
+  created_at: string
+  updated_at: string
+}
+
+export type StudyCourseRow = {
+  id: string
+  name: string
+  sort_order: number
   created_at: string
   updated_at: string
 }
@@ -39,6 +57,7 @@ export type StudyMessageRow = {
   role: StudyMessageRole
   unit_ordinal: number | null
   content: string
+  citations_json: string
   created_at: string
 }
 
@@ -84,13 +103,14 @@ export class StudyStore {
     this.db.transaction(() => {
       this.db.run(
         `INSERT INTO study_sessions(
-          id, request_id, document_version_id, title, subject, source_name, overview, outline_json,
+          id, request_id, document_version_id, course_id, title, subject, source_name, overview, outline_json,
           habits_json, warnings_json, truncated, material_chars, material_chunks, status, summary_json,
           teacher_snapshot_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         bundle.session.id,
         bundle.session.request_id,
         bundle.session.document_version_id,
+        bundle.session.course_id,
         bundle.session.title,
         bundle.session.subject,
         bundle.session.source_name,
@@ -122,13 +142,14 @@ export class StudyStore {
         )
       }
       this.db.run(
-        `INSERT INTO study_messages(id, session_id, role, unit_ordinal, content, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO study_messages(id, session_id, role, unit_ordinal, content, citations_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         bundle.message.id,
         bundle.message.session_id,
         bundle.message.role,
         bundle.message.unit_ordinal,
         bundle.message.content,
+        bundle.message.citations_json,
         bundle.message.created_at,
       )
     })
@@ -145,6 +166,7 @@ export class StudyStore {
     return rows.map((row) => ({
       sessionId: row.id,
       documentVersionId: row.document_version_id,
+      courseId: row.course_id ?? null,
       title: row.title,
       subject: row.subject,
       sourceName: row.source_name,
@@ -163,6 +185,70 @@ export class StudyStore {
     )
   }
 
+  listCourseRows(): StudyCourse[] {
+    return this.db.all<StudyCourseRow>('SELECT * FROM study_courses ORDER BY sort_order ASC, created_at ASC').map((row) => ({
+      courseId: row.id,
+      name: row.name,
+      sortOrder: Number(row.sort_order),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }))
+  }
+
+  findCourse(id: string): StudyCourse | undefined {
+    const row = this.db.get<StudyCourseRow>('SELECT * FROM study_courses WHERE id = ?', id)
+    return row ? {
+      courseId: row.id,
+      name: row.name,
+      sortOrder: Number(row.sort_order),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    } : undefined
+  }
+
+  findCourseByName(name: string): StudyCourse | undefined {
+    const row = this.db.get<StudyCourseRow>('SELECT * FROM study_courses WHERE name = ?', name)
+    return row ? {
+      courseId: row.id,
+      name: row.name,
+      sortOrder: Number(row.sort_order),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    } : undefined
+  }
+
+  createCourse(course: StudyCourse): void {
+    this.db.run(
+      `INSERT INTO study_courses(id, name, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      course.courseId, course.name, course.sortOrder, course.createdAt, course.updatedAt,
+    )
+  }
+
+  renameCourse(courseId: string, name: string, updatedAt: string): void {
+    this.db.run('UPDATE study_courses SET name = ?, updated_at = ? WHERE id = ?', name, updatedAt, courseId)
+  }
+
+  reorderCourses(ids: string[], updatedAt: string): void {
+    this.db.transaction(() => {
+      ids.forEach((id, index) => {
+        this.db.run('UPDATE study_courses SET sort_order = ?, updated_at = ? WHERE id = ?', index, updatedAt, id)
+      })
+    })
+  }
+
+  /** 删课程：先清掉每份课件的用量，再删课件（units/messages/checks 等随外键级联）。 */
+  deleteCourse(courseId: string): void {
+    this.db.transaction(() => {
+      const sessions = this.db.all<{ id: string }>('SELECT id FROM study_sessions WHERE course_id = ?', courseId)
+      for (const session of sessions) {
+        this.db.run('DELETE FROM ai_usage WHERE session_id = ?', session.id)
+        this.db.run('DELETE FROM study_sessions WHERE id = ?', session.id)
+      }
+      this.db.run('DELETE FROM study_courses WHERE id = ?', courseId)
+    })
+  }
+
   listMessages(sessionId: string): StudyMessageRow[] {
     return this.db.all<StudyMessageRow>(
       'SELECT * FROM study_messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC',
@@ -173,13 +259,14 @@ export class StudyStore {
   appendMessage(message: StudyMessageRow): void {
     this.db.transaction(() => {
       this.db.run(
-        `INSERT INTO study_messages(id, session_id, role, unit_ordinal, content, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO study_messages(id, session_id, role, unit_ordinal, content, citations_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         message.id,
         message.session_id,
         message.role,
         message.unit_ordinal,
         message.content,
+        message.citations_json,
         message.created_at,
       )
       this.db.run('UPDATE study_sessions SET updated_at = ? WHERE id = ?', message.created_at, message.session_id)
@@ -474,6 +561,29 @@ export type UsageTotal = {
 
 export type UsageKindTotal = UsageTotal & { kind: string }
 
+function parseCitations(value: string): StudySlideCitation[] {
+  try {
+    const parsed = JSON.parse(value || '[]') as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is StudySlideCitation => {
+      if (!item || typeof item !== 'object') return false
+      const row = item as Record<string, unknown>
+      return typeof row.pageNumber === 'number' && typeof row.quote === 'string'
+    }).map((item) => ({
+      pageNumber: item.pageNumber,
+      pageId: typeof item.pageId === 'string' ? item.pageId : null,
+      quote: item.quote,
+      blockId: typeof item.blockId === 'string' ? item.blockId : null,
+      bbox: Array.isArray(item.bbox) && item.bbox.length === 4
+        && item.bbox.every((n) => typeof n === 'number')
+        ? item.bbox as [number, number, number, number]
+        : null,
+    }))
+  } catch {
+    return []
+  }
+}
+
 export function messageFromRow(row: StudyMessageRow): StudyMessage {
   return {
     id: row.id,
@@ -481,6 +591,7 @@ export function messageFromRow(row: StudyMessageRow): StudyMessage {
     role: row.role,
     unitOrdinal: row.unit_ordinal,
     content: row.content,
+    citations: parseCitations(row.citations_json ?? '[]'),
     createdAt: row.created_at,
   }
 }

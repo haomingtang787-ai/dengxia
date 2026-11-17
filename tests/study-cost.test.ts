@@ -214,7 +214,7 @@ describe('开课成本：分段理解复用与 token 用量', () => {
     if (!clearedSummary.ok) return
     expect(clearedSummary.data.summary).toBeNull()
 
-    const del = service.deleteCourse({ sessionId })
+    const del = service.deleteSession({ sessionId })
     expect(del.ok).toBe(true)
     if (!del.ok) return
     expect(del.data.items.some((item) => item.sessionId === sessionId)).toBe(false)

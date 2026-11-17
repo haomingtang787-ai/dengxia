@@ -929,7 +929,7 @@ export function App() {
         </div>
         {notice ? <div className={`banner ${notice.tone === 'bad' ? 'bad' : 'info'}`}>{notice.text}</div> : null}
       </div>
-      <div className={`shell ${view === 'doc' ? '' : 'two'}${libraryOpen ? '' : ' library-collapsed'}`}>
+      <div className={`shell ${view === 'doc' ? '' : 'two'}${libraryOpen ? '' : ' library-collapsed'}${view === 'study' ? ' teacher-only' : ''}`}>
         <aside className={`panel library${libraryOpen ? '' : ' collapsed'}`}>
           {libraryOpen ? (
             <>

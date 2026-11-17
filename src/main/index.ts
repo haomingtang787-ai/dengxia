@@ -353,6 +353,262 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 700))
     return
   }
+  if (action === 'workspace-cites') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    const state = await win.webContents.executeJavaScript(
+      `(() => {
+        const cite = document.querySelector('.ws-cite');
+        cite?.scrollIntoView({ block: 'center' });
+        return {
+          courses: document.querySelectorAll('.ws-course').length,
+          docs: document.querySelectorAll('.ws-doc').length,
+          units: document.querySelectorAll('.ws-unit').length,
+          lectures: document.querySelectorAll('.ws-lecture').length,
+          messages: document.querySelectorAll('.ws-message').length,
+          cites: document.querySelectorAll('.ws-cite').length,
+          images: document.querySelectorAll('.ws-cite-thumb img').length,
+          boxes: document.querySelectorAll('.ws-cite-box').length,
+          chips: document.querySelectorAll('.ws-cite-chips button').length,
+          contextSections: document.querySelectorAll('.ws-context-section').length,
+          citeText: cite?.innerText?.slice(0, 240) ?? '',
+        };
+      })()`,
+    )
+    console.log('[smoke] workspace', JSON.stringify(state))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
+  if (action === 'workspace-right') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    console.log('[smoke] 打开这一讲', await click('这一讲'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const state = await win.webContents.executeJavaScript(
+      `(() => {
+        const rail = document.querySelector('.ws-context');
+        const r = rail?.getBoundingClientRect();
+        return {
+          open: rail?.classList.contains('open') ?? false,
+          display: rail ? getComputedStyle(rail).display : '',
+          width: r ? Math.round(r.width) : 0,
+          height: r ? Math.round(r.height) : 0,
+          sections: rail?.innerText?.slice(0, 260) ?? '',
+        };
+      })()`,
+    )
+    console.log('[smoke] right', JSON.stringify(state))
+    return
+  }
+  if (action === 'workspace-peek') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const b = document.querySelector('.ws-cite-label button'); b?.click(); return Boolean(b); })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const state = await win.webContents.executeJavaScript(
+      `(() => ({
+        open: Boolean(document.querySelector('.ws-peek')),
+        image: Boolean(document.querySelector('.ws-peek-image img')),
+        box: Boolean(document.querySelector('.ws-peek .ws-cite-box')),
+      }))()`,
+    )
+    console.log('[smoke] peek', JSON.stringify(state))
+    return
+  }
+  if (action === 'workspace-materials') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    console.log('[smoke] 打开整份课件', await click('整份课件'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const state = await win.webContents.executeJavaScript(
+      `(() => ({
+        open: Boolean(document.querySelector('.course-materials')),
+        tools: Boolean(document.querySelector('.study-tools')),
+        cards: document.querySelectorAll('.study-tool-card').length,
+        usage: document.querySelector('.study-usage')?.innerText?.slice(0, 160) ?? '',
+      }))()`,
+    )
+    console.log('[smoke] materials', JSON.stringify(state))
+    return
+  }
+  if (action === 'workspace-course') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    const before = await win.webContents.executeJavaScript(`document.querySelectorAll('.ws-course').length`)
+    const opened = await win.webContents.executeJavaScript(
+      `(() => { const b = document.querySelector('.ws-icon[title="新建课程"]'); b?.click(); return Boolean(b); })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    const typed = await win.webContents.executeJavaScript(
+      `(() => {
+        const input = document.querySelector('.ws-course-dialog input');
+        if (!input) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, '线性代数（冒烟新建）');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    console.log('[smoke] 建课', await click('建这门课'))
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const after = await win.webContents.executeJavaScript(
+      `(() => ({
+        courses: document.querySelectorAll('.ws-course').length,
+        dialog: Boolean(document.querySelector('.ws-course-dialog')),
+        names: [...document.querySelectorAll('.ws-course-name')].map((x) => x.textContent),
+      }))()`,
+    )
+    console.log('[smoke] course', JSON.stringify({ before, opened, typed, after }))
+    return
+  }
+  if (action === 'workspace-unit') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    const state = await win.webContents.executeJavaScript(
+      `(() => {
+        const second = document.querySelectorAll('.ws-unit')[1];
+        second?.click();
+        return {
+          before: document.querySelector('.ws-center-head h2')?.innerText ?? '',
+          messages: document.querySelectorAll('.ws-message').length,
+          clicked: Boolean(second),
+        };
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const after = await win.webContents.executeJavaScript(
+      `(() => {
+        const active = document.querySelector('.ws-unit.active');
+        const lecture = document.querySelector('.ws-lecture.active');
+        const firstData = document.querySelector('.ws-unit-divider[data-unit="1"]');
+        return {
+          activeUnit: active?.innerText ?? '',
+          messages: document.querySelectorAll('.ws-message').length,
+          activeLecture: Boolean(lecture),
+          target: Boolean(firstData),
+          top: firstData ? Math.round(firstData.getBoundingClientRect().top) : null,
+        };
+      })()`,
+    )
+    const collapsed = await win.webContents.executeJavaScript(
+      `(() => { const b = document.querySelector('.ws-icon[title="收起左栏"]'); b?.click(); return Boolean(b); })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const left = await win.webContents.executeJavaScript(
+      `(() => ({
+        classes: document.querySelector('.ws-study')?.className ?? '',
+        width: Math.round(document.querySelector('.ws-left')?.getBoundingClientRect().width ?? 0),
+        collapsed: document.querySelector('.ws-left')?.classList.contains('collapsed') ?? false,
+      }))()`,
+    )
+    console.log('[smoke] unit', JSON.stringify({ state, after, collapsed, left }))
+    return
+  }
+  if (action === 'workspace-send') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    const typed = await win.webContents.executeJavaScript(
+      `(() => {
+        const area = document.querySelector('.ws-composer textarea');
+        if (!area) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+        setter.call(area, '请对照第 2 页，说明这个内积式子为什么能用来判断正交，并引用第 2 页原文。');
+        area.dispatchEvent(new Event('input', { bubbles: true }));
+        area.focus();
+        return true;
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    console.log('[smoke] 发送问题', await click('发送'), typed)
+    await new Promise((resolve) => setTimeout(resolve, 28000))
+    const state = await win.webContents.executeJavaScript(
+      `(() => {
+        const last = [...document.querySelectorAll('.ws-message.assistant')].at(-1);
+        const cites = last?.querySelectorAll('.ws-cite').length ?? 0;
+        const images = last?.querySelectorAll('.ws-cite-thumb img').length ?? 0;
+        return {
+          messages: document.querySelectorAll('.ws-message').length,
+          last: last?.innerText?.slice(0, 260) ?? '',
+          cites,
+          images,
+          error: document.querySelector('.banner.bad')?.innerText ?? '',
+          busy: document.querySelector('.ws-message.pending') ? true : false,
+        };
+      })()`,
+    )
+    console.log('[smoke] send', JSON.stringify(state))
+    return
+  }
+  if (action === 'workspace-course-edit') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    await click('老师')
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    const found = await win.webContents.executeJavaScript(
+      `(() => {
+        const course = [...document.querySelectorAll('.ws-course')].find((node) => node.innerText.includes('冒烟'));
+        const rename = course?.querySelector('button[title="改名"]');
+        rename?.click();
+        return Boolean(course && rename);
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const typed = await win.webContents.executeJavaScript(
+      `(() => {
+        const input = document.querySelector('.ws-course-dialog input');
+        if (!input) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, '冒烟改名课程');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    console.log('[smoke] 保存改名', await click('保存新名字'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const renamed = await win.webContents.executeJavaScript(
+      `(() => [...document.querySelectorAll('.ws-course-name')].map((x) => x.textContent))()`,
+    )
+    const moved = await win.webContents.executeJavaScript(
+      `(() => {
+        const course = [...document.querySelectorAll('.ws-course')].find((node) => node.innerText.includes('冒烟改名课程'));
+        const up = course?.querySelector('button[title="上移"]');
+        up?.click();
+        return Boolean(up);
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    const order = await win.webContents.executeJavaScript(
+      `(() => [...document.querySelectorAll('.ws-course-name')].map((x) => x.textContent))()`,
+    )
+    await win.webContents.executeJavaScript(`window.confirm = () => true; true`)
+    const deleted = await win.webContents.executeJavaScript(
+      `(() => {
+        const course = [...document.querySelectorAll('.ws-course')].find((node) => node.innerText.includes('冒烟改名课程'));
+        const away = course?.querySelector('button[title="删除课程"]');
+        away?.click();
+        return Boolean(away);
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const final = await win.webContents.executeJavaScript(
+      `(() => ({
+        courses: document.querySelectorAll('.ws-course').length,
+        names: [...document.querySelectorAll('.ws-course-name')].map((x) => x.textContent),
+      }))()`,
+    )
+    console.log('[smoke] courseEdit', JSON.stringify({ found, typed, renamed, moved, order, deleted, final }))
+    return
+  }
   if (action === 'teacher-more') {
     await new Promise((resolve) => setTimeout(resolve, 700))
     console.log('[smoke] 打开老师页', await click('老师'))

@@ -16,7 +16,7 @@ describe('storage', () => {
     expect(migration?.version).toBe(1)
     expect(migration && isUtcIso(migration.applied_at)).toBe(true)
     const latest = db.get<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
-    expect(latest?.version).toBe(13)
+    expect(latest?.version).toBe(14)
     const columns = db.all<{ name: string }>('PRAGMA table_info(lecture_cards)')
     expect(columns.some((column) => column.name === 'last_graded_at')).toBe(true)
     expect(() => db.run('INSERT INTO document_versions(id, document_id, sha256, format, size_bytes, original_relpath, status, parser_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', 'v', 'missing', 'abc', 'txt', 1, 'originals/a', 'stored', 't', new Date().toISOString())).toThrow(/FOREIGN KEY/)

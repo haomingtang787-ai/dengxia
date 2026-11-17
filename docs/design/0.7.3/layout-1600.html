@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>灯下 0.7.3 三栏课堂草图</title>
+<style>
+  :root{
+    --bg:#f7f8f4;
+    --rail:#f1f3ee;
+    --card:#ffffff;
+    --ink:#243247;
+    --muted:#62707f;
+    --soft:#8a97a6;
+    --line:#e2e7e1;
+    --line-strong:#d7ddd4;
+    --accent:#4263eb;
+    --accent-soft:#e9eeff;
+    --green:#1f7f6a;
+    --green-soft:#e7f2ee;
+    --warn:#a36a1f;
+    --warn-soft:#fbf1e2;
+    --shadow:0 10px 30px rgba(36,50,71,.06);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;width:1600px;height:1000px;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:"Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif;
+    font-size:13px;line-height:1.6;-webkit-font-smoothing:antialiased;}
+  button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;}
+  .app{display:grid;grid-template-columns:268px minmax(0,1fr) 332px;height:1000px;}
+
+  /* ── 左栏 ───────────────────────────────────── */
+  .rail{background:var(--rail);border-right:1px solid var(--line-strong);display:flex;flex-direction:column;min-height:0;}
+  .brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px;}
+  .logo{width:30px;height:30px;border-radius:9px;background:#20483d;color:#f5f3e9;display:flex;align-items:center;justify-content:center;
+    font-family:"Songti SC","SimSun",serif;font-size:17px;font-weight:600;letter-spacing:.02em;}
+  .brand-name{font-family:"Songti SC","SimSun",serif;font-size:22px;font-weight:600;letter-spacing:.12em;line-height:1.1;}
+  .brand-sub{margin-top:3px;color:var(--soft);font-size:10.5px;letter-spacing:.14em;}
+  .rail-actions{padding:2px 14px 10px;display:flex;flex-direction:column;gap:8px;}
+  .new-course{height:38px;border-radius:10px;background:#243247;color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;
+    font-size:12.5px;font-weight:600;box-shadow:0 4px 14px rgba(36,50,71,.14);}
+  .new-course span{font-size:15px;font-weight:400;}
+  .search{height:34px;border:1px solid var(--line-strong);background:#fbfcf9;border-radius:9px;display:flex;align-items:center;gap:7px;padding:0 10px;color:var(--soft);font-size:11.5px;}
+  .search .icon{width:13px;height:13px;opacity:.7;}
+
+  .tree{flex:1;min-height:0;overflow:hidden;padding:4px 10px 8px;}
+  .tree-label{display:flex;align-items:center;justify-content:space-between;padding:10px 8px 7px;color:var(--soft);font-size:10.5px;letter-spacing:.08em;}
+  .course{display:flex;align-items:center;gap:6px;height:32px;padding:0 8px;border-radius:8px;color:var(--ink);font-size:12.5px;font-weight:600;}
+  .chev{width:11px;height:11px;opacity:.6;flex:0 0 auto;}
+  .course-meta{margin-left:auto;color:var(--soft);font-size:10px;font-weight:400;}
+  .doc{display:flex;align-items:center;gap:7px;margin:1px 0 1px 8px;padding:0 8px;height:30px;border-radius:8px;color:#3d4b5c;font-size:12px;}
+  .doc.active{background:#e7ecfb;color:#223b9a;}
+  .doc .file{width:12px;height:12px;opacity:.65;flex:0 0 auto;}
+  .doc .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;}
+  .badge{margin-left:auto;background:#dfe4ee;color:#5c6b7f;border-radius:999px;padding:1px 6px;font-size:9.5px;line-height:1.5;flex:0 0 auto;}
+  .doc.active .badge{background:#d5ddfa;color:#2c46b2;}
+
+  .unit{position:relative;display:flex;align-items:center;gap:6px;height:27px;margin-left:28px;padding:0 9px 0 12px;border-radius:7px;color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .unit .num{color:#95a1ad;font-size:10px;flex:0 0 auto;}
+  .unit.active{background:#eef2ff;color:#223b9a;font-weight:600;}
+  .unit.active::before{content:"";position:absolute;left:0;top:5px;bottom:5px;width:3px;border-radius:3px;background:var(--accent);}
+  .unit.active .num{color:#4b64c7;}
+  .unit:hover{background:#e9edf6;}
+
+  .rail-foot{border-top:1px solid var(--line-strong);padding:8px 10px 12px;display:flex;flex-direction:column;gap:2px;}
+  .foot-item{display:flex;align-items:center;gap:9px;height:32px;padding:0 10px;border-radius:8px;color:var(--muted);font-size:11.5px;}
+  .foot-item:hover{background:#e9edf6;}
+  .foot-item svg{width:14px;height:14px;opacity:.65;}
+  .foot-item .hint{margin-left:auto;font-size:9.5px;color:#a2adb7;}
+
+  /* ── 中栏 ───────────────────────────────────── */
+  .stage{display:grid;grid-template-rows:86px minmax(0,1fr) 150px;min-width:0;background:var(--bg);}
+  .stage-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:17px 26px 12px;border-bottom:1px solid var(--line);background:rgba(247,248,244,.92);}
+  .crumbs{display:flex;align-items:center;gap:6px;color:var(--soft);font-size:10.5px;margin-bottom:5px;}
+  .crumbs .slash{opacity:.45;}
+  .crumbs .doc-crumb{color:#4c5b6b;}
+  .head-title{display:flex;align-items:center;gap:9px;font-family:"Songti SC","SimSun",serif;font-size:19px;font-weight:600;letter-spacing:.02em;}
+  .head-title .live{font-family:"Microsoft YaHei UI",sans-serif;font-size:9.5px;font-weight:600;color:var(--green);background:var(--green-soft);border-radius:999px;padding:2px 7px;letter-spacing:.04em;}
+  .head-meta{margin-top:4px;color:var(--soft);font-size:10.5px;}
+  .head-actions{display:flex;align-items:center;gap:7px;padding-top:3px;}
+  .ghost{height:30px;padding:0 11px;border:1px solid var(--line-strong);background:#fff;border-radius:8px;color:#51606f;font-size:11px;}
+  .ghost:hover{border-color:#c3ccc2;}
+  .ghost.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+
+  .chat{padding:18px 28px 8px;overflow:hidden;position:relative;}
+  .chat::after{content:"";position:absolute;left:0;right:0;bottom:0;height:26px;background:linear-gradient(to bottom,rgba(247,248,244,0),var(--bg));pointer-events:none;}
+  .system{display:flex;align-items:center;justify-content:center;gap:8px;color:#9aa5af;font-size:10px;margin:2px 0 16px;}
+  .system::before,.system::after{content:"";width:34px;height:1px;background:#e4e8e2;}
+
+  .msg{display:flex;gap:10px;margin:0 0 16px;max-width:820px;}
+  .avatar{width:30px;height:30px;border-radius:50%;background:#20483d;color:#f6f3e8;display:flex;align-items:center;justify-content:center;
+    font-family:"Songti SC","SimSun",serif;font-size:13px;flex:0 0 auto;margin-top:2px;}
+  .msg-body{min-width:0;}
+  .msg-head{display:flex;align-items:center;gap:8px;margin-bottom:3px;}
+  .who{font-size:11.5px;font-weight:600;color:#26374a;}
+  .when{font-size:9.5px;color:#a1adb6;}
+  .bubble{font-size:12.5px;line-height:1.72;color:#2b3a4a;}
+  .bubble p{margin:0 0 6px;}
+  .bubble p:last-child{margin-bottom:0;}
+  .cite-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;}
+  .cite{display:inline-flex;align-items:center;gap:4px;background:#eff2f4;border:1px solid #e4e8eb;color:#5d6b78;border-radius:6px;padding:1px 6px;font-size:9.5px;white-space:nowrap;}
+  .cite .pg{color:#7f8b97;}
+  .cite:hover{background:#e7ecf7;border-color:#d7dfef;color:#314a86;}
+
+  .slide-ref{display:flex;gap:11px;margin:9px 0 2px;max-width:660px;border:1px solid #e3e8e2;background:#fcfdfa;border-radius:12px;padding:8px;box-shadow:0 4px 14px rgba(36,50,71,.035);}
+  .slide-thumb{position:relative;width:252px;height:142px;flex:0 0 auto;border-radius:8px;overflow:hidden;border:1px solid #dde3ea;background:#eef1f6;}
+  .slide-canvas{position:absolute;inset:0;background:#fff;padding:13px 16px 10px;color:#243247;}
+  .slide-canvas .kicker{font-size:8px;letter-spacing:.14em;color:#7c8b9c;margin-bottom:3px;}
+  .slide-canvas .stitle{font-family:"Songti SC","SimSun",serif;font-size:17px;font-weight:600;letter-spacing:.03em;margin-bottom:7px;}
+  .slide-canvas .formula{font-family:"Cambria Math","Times New Roman",serif;font-size:16px;color:#1f3e5a;margin:2px 0 7px;}
+  .slide-canvas .sline{height:1px;background:#e7ebe4;margin:0 0 6px;width:86%;}
+  .slide-canvas .bullet{display:flex;gap:5px;font-size:8.5px;color:#5c6b7b;line-height:1.5;margin-bottom:2px;}
+  .slide-canvas .bullet::before{content:"·";color:#9aa7b4;}
+  .slide-canvas .hl{position:absolute;left:13px;top:54px;width:126px;height:28px;border-radius:3px;background:rgba(255,214,102,.38);border:1px solid rgba(185,138,31,.55);box-shadow:0 0 0 2px rgba(255,214,102,.12);}
+  .slide-side{flex:1;min-width:0;padding:2px 2px 2px 0;display:flex;flex-direction:column;}
+  .slide-side .slabel{display:flex;align-items:center;justify-content:space-between;color:#7c8996;font-size:9px;letter-spacing:.04em;}
+  .slide-side .slabel b{color:#3f5369;font-weight:600;letter-spacing:0;}
+  .slide-side .squote{margin-top:7px;font-family:"Cambria Math","Times New Roman",serif;font-size:14px;color:#23384d;}
+  .slide-side .snote{margin-top:4px;color:#6d7a87;font-size:10px;line-height:1.55;}
+  .slide-side .sopen{margin-top:auto;display:inline-flex;align-items:center;gap:4px;color:#3d5bc4;font-size:9.5px;align-self:flex-start;padding-top:5px;}
+  .slide-side .sopen:hover{text-decoration:underline;}
+  .slide-side .sopen svg{width:10px;height:10px;}
+
+  .math{margin:7px 0;padding:8px 12px;border-radius:8px;background:#f5f7f3;border:1px solid #e7ebe3;font-family:"Cambria Math","Times New Roman",serif;font-size:15px;color:#20394f;letter-spacing:.01em;}
+
+  .user{display:flex;justify-content:flex-end;margin:0 0 16px;}
+  .user .bubble-wrap{max-width:560px;}
+  .user .meta{display:flex;justify-content:flex-end;gap:8px;align-items:center;margin-bottom:3px;}
+  .user .who{color:#40506a;font-size:11px;}
+  .user .bubble{background:#eef2ff;border:1px solid #dfe6ff;border-radius:12px 4px 12px 12px;padding:9px 12px;color:#2b3a55;font-size:12.5px;}
+
+  .lecture-divider{display:flex;align-items:center;gap:12px;margin:20px 0 16px;color:#8d99a4;}
+  .lecture-divider::before,.lecture-divider::after{content:"";flex:1;height:1px;background:#e3e7e1;}
+  .lecture-divider .label{display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.04em;white-space:nowrap;}
+  .lecture-divider .label b{font-weight:600;color:#5f6d7a;}
+  .lecture-divider .label .dot{width:5px;height:5px;border-radius:50%;background:#a9b4be;}
+
+  .typing{display:inline-flex;align-items:center;gap:3px;margin-left:5px;vertical-align:middle;}
+  .typing i{width:4px;height:4px;border-radius:50%;background:#b4bfc8;display:block;}
+
+  /* ── 输入区 ─────────────────────────────────── */
+  .composer{padding:0 26px 18px;display:flex;flex-direction:column;justify-content:flex-end;}
+  .composer-box{background:#fff;border:1px solid var(--line-strong);border-radius:14px;box-shadow:var(--shadow);overflow:hidden;}
+  .composer-box:focus-within{border-color:#bec9e9;box-shadow:0 0 0 3px rgba(66,99,235,.08),var(--shadow);}
+  .composer-input{display:flex;align-items:flex-start;gap:8px;padding:13px 15px 8px;}
+  .composer-input .plus{width:20px;height:20px;border-radius:50%;background:#f1f3ef;color:#7b8792;display:flex;align-items:center;justify-content:center;font-size:13px;flex:0 0 auto;margin-top:2px;}
+  .composer-input .placeholder{flex:1;color:#9ba6b0;font-size:12.5px;line-height:1.5;padding-top:1px;}
+  .composer-input .placeholder b{color:#6b7682;font-weight:500;}
+  .composer-bar{display:flex;align-items:center;gap:6px;padding:7px 10px 9px 12px;border-top:1px solid #f0f2ee;}
+  .chip{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:999px;background:#f4f6f2;color:#5d6a76;font-size:10.5px;border:1px solid #e7ebe3;}
+  .chip.active{background:#eef2ff;border-color:#dfe6ff;color:#2f4bb5;font-weight:600;}
+  .chip .caret{font-size:8px;opacity:.6;}
+  .composer-bar .spacer{flex:1;}
+  .model{display:flex;align-items:center;gap:5px;color:#586674;font-size:10.5px;}
+  .model .ok{width:5px;height:5px;border-radius:50%;background:#2e9b79;}
+  .usage{color:#6d7a86;font-size:10.5px;padding-left:8px;border-left:1px solid #e7ebe3;}
+  .send{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;margin-left:4px;box-shadow:0 3px 10px rgba(66,99,235,.28);}
+  .send svg{width:13px;height:13px;}
+  .composer-note{display:flex;justify-content:space-between;padding:7px 4px 0;color:#a1acb5;font-size:9.5px;}
+
+  /* ── 右栏 ───────────────────────────────────── */
+  .context{background:#fbfcf9;border-left:1px solid var(--line-strong);display:flex;flex-direction:column;min-height:0;}
+  .ctx-head{padding:18px 18px 14px;border-bottom:1px solid var(--line);}
+  .ctx-kicker{display:flex;align-items:center;justify-content:space-between;color:var(--soft);font-size:10px;letter-spacing:.1em;}
+  .ctx-kicker .pin{color:#6f7c88;font-size:9.5px;letter-spacing:0;background:#f0f2ed;border-radius:999px;padding:1px 7px;}
+  .ctx-title{margin-top:6px;display:flex;align-items:baseline;gap:7px;}
+  .ctx-title .n{font-family:"Songti SC","SimSun",serif;font-size:15px;color:#40536b;}
+  .ctx-title .t{font-family:"Songti SC","SimSun",serif;font-size:19px;font-weight:600;letter-spacing:.02em;}
+  .ctx-meta{margin-top:3px;color:var(--soft);font-size:10px;}
+  .ctx-scroll{padding:12px 14px 16px;overflow:hidden;display:flex;flex-direction:column;gap:10px;}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 13px;box-shadow:0 2px 8px rgba(36,50,71,.025);}
+  .card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .card-title{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:#33465c;}
+  .card-title .tick{width:3px;height:11px;border-radius:2px;background:#4263eb;}
+  .card-more{color:#9aa5af;font-size:9.5px;}
+  .kp{display:flex;align-items:flex-start;gap:7px;padding:6px 0;border-bottom:1px dashed #edf0eb;font-size:11.5px;color:#3e4e60;line-height:1.55;}
+  .kp:last-child{border-bottom:0;padding-bottom:2px;}
+  .kp .no{width:15px;height:15px;border-radius:50%;background:#f0f3ff;color:#4763c8;font-size:9px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;margin-top:1px;}
+  .kp .text{flex:1;min-width:0;}
+  .kp .pg{margin-left:4px;color:#93a0ab;font-size:9px;white-space:nowrap;}
+
+  .note-row{display:flex;gap:7px;padding:4px 0;font-size:11px;color:#4b5a69;line-height:1.55;}
+  .note-row .tag{flex:0 0 44px;color:#7b8792;font-size:9.5px;padding-top:1px;}
+  .note-row.ok .tag{color:var(--green);}
+  .note-row.warn .tag{color:var(--warn);}
+
+  .artifacts{display:flex;flex-wrap:wrap;gap:5px;}
+  .artifact{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 7px;border-radius:6px;background:#f4f6f2;border:1px solid #e6eae3;color:#596773;font-size:9.5px;}
+  .artifact.done{background:#eaf4ef;border-color:#d7e9df;color:#1f7f6a;}
+  .artifact.done::before{content:"✓";font-size:9px;}
+  .artifact.new{background:#fbf3e7;border-color:#f0e2cb;color:#9a6a22;}
+  .artifact.new::before{content:"＋";font-size:9px;}
+
+  .usage-line{display:flex;align-items:baseline;justify-content:space-between;padding:3px 0;font-size:10.5px;color:#596773;}
+  .usage-line b{font-family:"Cambria Math","Segoe UI",sans-serif;font-size:12px;color:#26394f;font-weight:600;}
+  .usage-line .muted{color:#93a0ab;font-size:9px;}
+  .usage-bar{height:5px;border-radius:5px;background:#edf0ea;margin:7px 0 5px;overflow:hidden;}
+  .usage-bar i{display:block;height:100%;width:66%;background:linear-gradient(90deg,#3e63db,#2e9b79);border-radius:5px;}
+  .usage-foot{display:flex;justify-content:space-between;color:#8c98a2;font-size:9px;}
+
+  .quick{border-top:1px solid var(--line);padding:11px 15px 14px;background:#fbfcf9;}
+  .quick-label{color:#98a3ac;font-size:9.5px;margin-bottom:7px;letter-spacing:.04em;}
+  .quick-chips{display:flex;flex-wrap:wrap;gap:5px;}
+  .quick-chip{height:24px;padding:0 8px;border-radius:999px;background:#fff;border:1px solid #e2e7e1;color:#54626f;font-size:10px;}
+  .quick-chip:hover{border-color:#c9d3e8;color:#2f4bb5;background:#f7f8ff;}
+
+  .foot-brand{display:flex;align-items:center;justify-content:space-between;padding:8px 16px 10px;border-top:1px solid var(--line);color:#a1acb5;font-size:9px;background:#f7f8f4;}
+  .foot-brand span:last-child{letter-spacing:.08em;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 左栏：课程 → 课件 → 讲 -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="logo">灯</div>
+      <div>
+        <div class="brand-name">灯下</div>
+        <div class="brand-sub">只在这台电脑上的老师</div>
+      </div>
+    </div>
+
+    <div class="rail-actions">
+      <button class="new-course"><span>＋</span> 新建课程</button>
+      <div class="search">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+        搜索课程、课件或讲
+      </div>
+    </div>
+
+    <div class="tree">
+      <div class="tree-label"><span>课程</span><span>3 门</span></div>
+
+      <div class="course">
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        线性代数
+        <span class="course-meta">3 份课件</span>
+      </div>
+
+      <div class="doc active">
+        <svg class="file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
+        <span class="name">正交对称矩阵预习.pdf</span>
+        <span class="badge">5 讲</span>
+      </div>
+      <div class="unit"><span class="num">01</span> 内积与长度</div>
+      <div class="unit active"><span class="num">02</span> 正交基</div>
+      <div class="unit"><span class="num">03</span> 施密特正交化</div>
+      <div class="unit"><span class="num">04</span> 正交矩阵与正交变换</div>
+      <div class="unit"><span class="num">05</span> 对称矩阵与谱定理</div>
+
+      <div class="doc">
+        <svg class="file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/></svg>
+        <span class="name">期末复习.pdf</span>
+        <span class="badge">3 讲</span>
+      </div>
+
+      <div class="course" style="margin-top:4px;">
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+        概率论
+        <span class="course-meta">2 份课件</span>
+      </div>
+      <div class="course">
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+        数据结构
+        <span class="course-meta">1 份课件</span>
+      </div>
+    </div>
+
+    <div class="rail-foot">
+      <div class="foot-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 1 4 16.5z"/><path d="M4 5.5v11"/></svg>
+        文稿库
+        <span class="hint">7 份</span>
+      </div>
+      <div class="foot-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+        复习
+        <span class="hint">5 张到点</span>
+      </div>
+      <div class="foot-item">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L14.6 3h-5.2l-.3 2.1a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L5 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.3 2.1h5.2l.3-2.1a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/></svg>
+        设置
+      </div>
+    </div>
+  </aside>
+
+  <!-- 中栏：一个课件一个对话 -->
+  <main class="stage">
+    <header class="stage-head">
+      <div>
+        <div class="crumbs">
+          <span>线性代数</span><span class="slash">/</span><span class="doc-crumb">正交对称矩阵预习.pdf</span>
+        </div>
+        <div class="head-title">第 2 讲 · 正交基 <span class="live">正在讲</span></div>
+        <div class="head-meta">5 讲 · 约 12 分钟 · 讲义 80 页 · 上次更新 09:31</div>
+      </div>
+      <div class="head-actions">
+        <button class="ghost">整份课件</button>
+        <button class="ghost">更多</button>
+      </div>
+    </header>
+
+    <section class="chat">
+      <div class="system">开课与总览 · 这份课件已拆成 5 讲</div>
+
+      <div class="msg">
+        <div class="avatar">师</div>
+        <div class="msg-body">
+          <div class="msg-head"><span class="who">老师</span><span class="when">09:24</span></div>
+          <div class="bubble">
+            <p>这份课件我拆成了 5 讲。第 1 讲先把长度和夹角建起来：内积给出长度，余弦给出夹角。后面四讲都靠这两个东西往上长。</p>
+          </div>
+          <div class="cite-row">
+            <span class="cite"><span class="pg">p.3</span> 内积的定义</span>
+            <span class="cite"><span class="pg">p.5</span> 长度与夹角</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 讲与讲之间只留一条细线 -->
+      <div class="lecture-divider">
+        <div class="label"><span class="dot"></span><b>第 2 讲 · 正交基</b><span style="color:#a1acb5;">约 8 分钟</span></div>
+      </div>
+
+      <div class="msg">
+        <div class="avatar">师</div>
+        <div class="msg-body">
+          <div class="msg-head"><span class="who">老师</span><span class="when">09:28</span></div>
+          <div class="bubble">
+            <p>先看第 14 页这句话：<b>两个向量正交，就是内积为 0</b>。它不是新定义，是把“垂直”翻译成内积语言。一组两两正交的非零向量一定线性无关——这条是后面施密特正交化的地基。</p>
+          </div>
+          <div class="cite-row">
+            <span class="cite"><span class="pg">p.14</span> 正交的定义</span>
+            <span class="cite"><span class="pg">p.16</span> 正交组线性无关</span>
+          </div>
+
+          <div class="slide-ref">
+            <div class="slide-thumb">
+              <div class="slide-canvas">
+                <div class="kicker">2.2</div>
+                <div class="stitle">正交的定义</div>
+                <div class="formula">x · y = 0</div>
+                <div class="sline"></div>
+                <div class="bullet">两个向量正交 ⇔ 内积为 0</div>
+                <div class="bullet">零向量与任何向量都正交</div>
+                <div class="hl"></div>
+              </div>
+            </div>
+            <div class="slide-side">
+              <div class="slabel"><span>对照讲义</span><b>p.14</b></div>
+              <div class="squote">“两个向量正交，就是内积为 0。”</div>
+              <div class="snote">这一页先把“垂直”翻译成内积语言；高亮的是定义式。</div>
+              <span class="sopen">打开这一页 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 17L17 7M9 7h8v8"/></svg></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="user">
+        <div class="bubble-wrap">
+          <div class="meta"><span class="who">你</span><span class="when">09:31</span></div>
+          <div class="bubble">正交和线性无关到底是什么关系？</div>
+        </div>
+      </div>
+
+      <div class="msg">
+        <div class="avatar">师</div>
+        <div class="msg-body">
+          <div class="msg-head"><span class="who">老师</span><span class="when">09:31</span></div>
+          <div class="bubble">
+            <p>一句话：<b>两两正交 ⇒ 线性无关</b>，反过来不成立。线性无关只要求“谁也表示不出谁”，正交还额外要求“互相垂直”。</p>
+            <p>所以正交是更强、更好用的条件；施密特正交化就是把一组普通基改造成正交基。</p>
+          </div>
+          <div class="cite-row">
+            <span class="cite"><span class="pg">p.16</span> 定理 2.3</span>
+            <span class="cite"><span class="pg">p.20</span> 施密特正交化</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="composer">
+      <div class="composer-box">
+        <div class="composer-input">
+          <div class="plus">＋</div>
+          <div class="placeholder">问第 2 讲：正交基，或直接说 <b>“总结这一讲” / “考考我”</b></div>
+        </div>
+        <div class="composer-bar">
+          <span class="chip active">直接讲解</span>
+          <span class="chip">引导我</span>
+          <span class="chip">技能：自动 <span class="caret">▾</span></span>
+          <div class="spacer"></div>
+          <span class="model"><span class="ok"></span>DeepSeek V3 · 已配置</span>
+          <span class="usage">课件 18.4k</span>
+          <button class="send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12l16-8-6 8 6 8z"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="composer-note"><span>Enter 发送 · Shift + Enter 换行</span><span>回答会附原文页码，点一下回讲义</span></div>
+    </section>
+  </main>
+
+  <!-- 右栏：这一讲的知识、手记、生成物、用量 -->
+  <aside class="context">
+    <div class="ctx-head">
+      <div class="ctx-kicker"><span>这一讲</span><span class="pin">只读 · 跟着对话走</span></div>
+      <div class="ctx-title"><span class="n">第 2 讲</span><span class="t">正交基</span></div>
+      <div class="ctx-meta">讲义 p.12–p.20 · 约 8 分钟</div>
+    </div>
+
+    <div class="ctx-scroll">
+      <div class="card">
+        <div class="card-head"><span class="card-title"><span class="tick"></span>知识点</span><span class="card-more">3 条</span></div>
+        <div class="kp"><span class="no">1</span><span class="text">正交 = 内积为 0；零向量与任何向量正交<span class="pg">p.14</span></span></div>
+        <div class="kp"><span class="no">2</span><span class="text">两两正交的非零向量组一定线性无关<span class="pg">p.16</span></span></div>
+        <div class="kp"><span class="no">3</span><span class="text">施密特正交化：投影、减去、单位化<span class="pg">p.20</span></span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span class="card-title"><span class="tick" style="background:#1f7f6a;"></span>老师手记</span><span class="card-more">这一讲</span></div>
+        <div class="note-row ok"><span class="tag">讲通了</span><span>他能说出“正交比线性无关更强”。</span></div>
+        <div class="note-row warn"><span class="tag">还卡着</span><span>正交组为什么自动线性无关，还靠背。</span></div>
+        <div class="note-row"><span class="tag">下次先</span><span>用 2×2 例子让他自己推一遍。</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span class="card-title"><span class="tick" style="background:#9a6a22;"></span>这一讲的生成物</span><span class="card-more">unit:2</span></div>
+        <div class="artifacts">
+          <span class="artifact done">复习大纲</span>
+          <span class="artifact done">3 道题测</span>
+          <span class="artifact new">学习总结</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span class="card-title"><span class="tick" style="background:#4d5f73;"></span>这份课件用量</span><span class="card-more">真实回报</span></div>
+        <div class="usage-line"><span>调用</span><b>12 次</b></div>
+        <div class="usage-line"><span>输入</span><b>18.4k</b><span class="muted">命中 12.1k / 未命中 6.3k</span></div>
+        <div class="usage-line"><span>输出</span><b>6.2k</b><span class="muted">含推理 1.4k</span></div>
+        <div class="usage-bar"><i></i></div>
+        <div class="usage-foot"><span>前缀缓存命中 66%</span><span>核对官方余额 ›</span></div>
+      </div>
+    </div>
+
+    <div class="quick">
+      <div class="quick-label">想让我做点什么？点了只是把话放进输入框</div>
+      <div class="quick-chips">
+        <span class="quick-chip">总结这一讲</span>
+        <span class="quick-chip">考考我</span>
+        <span class="quick-chip">找原文</span>
+      </div>
+    </div>
+
+    <div class="foot-brand"><span>灯下 · 本地优先</span><span>没有账号，没有云同步</span></div>
+  </aside>
+</div>
+</body>
+</html>

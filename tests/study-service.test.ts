@@ -321,7 +321,7 @@ describe('AI 私教学习会话', () => {
       expect(finished.data.summary?.mastered).toContain('叶绿体是场所')
       expect(finished.data.teacherNote).toBeNull()
     }
-    expect(db.get<{ max: number }>('SELECT MAX(version) AS max FROM schema_migrations')?.max).toBe(13)
+    expect(db.get<{ max: number }>('SELECT MAX(version) AS max FROM schema_migrations')?.max).toBe(14)
   })
 
   it('同一 requestId 重复创建不会再调用模型', async () => {
