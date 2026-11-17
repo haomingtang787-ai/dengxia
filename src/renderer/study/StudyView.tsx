@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DocumentListItem, PageView } from '../../shared/contract'
+import type { ReviewSummary } from '../../shared/teaching'
 import type {
   StudyCheck,
   StudyCourseSession,
@@ -136,6 +137,9 @@ export function StudyView({
   const [modelChoices, setModelChoices] = useState<string[]>([])
   const [modelBusy, setModelBusy] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [railBusy, setRailBusy] = useState<'review' | 'cards' | null>(null)
+  const [railNote, setRailNote] = useState('')
+  const [reviewStats, setReviewStats] = useState<ReviewSummary | null>(null)
   const [busy, setBusy] = useState<Busy>(null)
   const [progress, setProgress] = useState<StudyProgress | null>(null)
   const [error, setError] = useState('')
@@ -190,6 +194,16 @@ export function StudyView({
     stickBottom.current = false
     return result.data
   }, [api, notify])
+
+  const refreshReviewStats = useCallback(async () => {
+    if (!api) return
+    const result = await api.teaching.reviewSummary()
+    if (result.ok) setReviewStats(result.data)
+  }, [api])
+
+  useEffect(() => {
+    void refreshReviewStats()
+  }, [refreshReviewStats])
 
   useEffect(() => {
     let alive = true
@@ -315,6 +329,7 @@ export function StudyView({
   useEffect(() => {
     setToolFocus(null)
     setRightOpen(false)
+    setRailNote('')
   }, [detail?.sessionId])
 
   useEffect(() => {
@@ -454,6 +469,90 @@ export function StudyView({
     }
     setModelName(saved.data.model)
     notify('info', `模型已切换到 ${saved.data.model}，下一句起生效。`)
+  }
+
+  async function generateReview() {
+    if (!api || !detail || busy || railBusy) return
+    setRailBusy('review')
+    setRailNote('正在整理这一讲的总结和大纲…')
+    setError('')
+    const base = { sessionId: detail.sessionId, unitOrdinal: activeUnit?.ordinal ?? null }
+    const summary = await api.study.tool({ ...base, tool: 'summary' })
+    if (!summary.ok) {
+      setRailBusy(null)
+      setRailNote('复习资料没生成，稍后再试。')
+      notify('bad', summary.error.message)
+      return
+    }
+    const outline = await api.study.tool({ ...base, tool: 'outline' })
+    setRailBusy(null)
+    if (!outline.ok) {
+      setDetail(summary.data)
+      setRailNote('总结已好；大纲这次没写成。')
+      notify('bad', `总结已生成，但大纲没写成：${outline.error.message}`)
+      return
+    }
+    setDetail(outline.data)
+    setRailNote('复习总结和大纲已生成，点下面的生成物就能看。')
+    notify('info', '复习总结和大纲已放进右栏「生成物」，点开就能看。')
+  }
+
+  function cardSeeds(unit: StudyUnit) {
+    const points = unit.keyPoints.map((point) => {
+      const match = unit.segments.find((segment) => segment.explain.includes(point) || segment.check.includes(point))
+      return { front: point, back: match?.explain ?? unit.source, quote: match?.source ?? unit.source }
+    })
+    if (points.length) return points
+    return unit.segments.map((segment) => ({ front: segment.check, back: segment.explain, quote: segment.source }))
+  }
+
+  async function generateCards() {
+    if (!api || !detail || !activeUnit || busy || railBusy) return
+    const seeds = cardSeeds(activeUnit)
+      .map((seed) => ({ ...seed, front: seed.front.trim().slice(0, 240), back: seed.back.trim().slice(0, 800), quote: seed.quote.trim().slice(0, 800) }))
+      .filter((seed) => seed.front)
+    if (!seeds.length) {
+      notify('bad', '这一讲还没有能抽成卡片的知识点。先让老师讲一遍，再试。')
+      return
+    }
+    setRailBusy('cards')
+    setRailNote('正在把这一讲的知识点做成卡片…')
+    const existingResult = await api.teaching.cards.list()
+    const existing = new Set(existingResult.ok ? existingResult.data.items.map((card) => card.front.trim()) : [])
+    let created = 0
+    let failed = 0
+    for (const seed of seeds.slice(0, 5)) {
+      if (existing.has(seed.front)) continue
+      const result = await api.teaching.cards.create({
+        front: seed.front,
+        back: seed.back,
+        quote: seed.quote,
+        documentVersionId: detail.documentVersionId,
+      })
+      if (!result.ok) {
+        failed += 1
+        continue
+      }
+      existing.add(seed.front)
+      created += 1
+    }
+    setRailBusy(null)
+    await refreshReviewStats()
+    if (created) setRailNote(`已生成 ${created} 张卡片，去「复习」里看。`)
+    else if (failed) setRailNote('卡片这次没写成，稍后再试。')
+    else setRailNote('这些知识点已经有卡片了，没有重复生成。')
+    if (created) notify('info', `已把这一讲的 ${created} 张卡片放进复习队列，去「复习」里看。`)
+    else if (failed) notify('bad', '卡片这次没写成，稍后再试一次。')
+    else notify('info', '这些知识点已经有卡片了，没有重复生成。')
+  }
+
+  function personalizeTutoring() {
+    setMode('guided')
+    setSkill('diagnose')
+    setQuestion((current) => current.trim() || '按我的学习习惯，先帮我找出这一讲最该补的一个漏洞。')
+    questionRef.current?.focus()
+    setRailNote('已切到引导式；按发送开始个性化辅导。')
+    notify('info', '已切到引导式；按发送开始个性化辅导。')
   }
 
   async function createSession() {
@@ -778,9 +877,17 @@ export function StudyView({
       detail={detail}
       unit={activeUnit}
       open={rightOpen}
+      busy={busy !== null}
+      railBusy={railBusy}
+      railNote={railNote}
+      reviewStats={reviewStats}
       onClose={() => setRightOpen(false)}
       onOpenMaterials={(focus) => { setToolFocus(focus); setMaterialsOpen(true) }}
-      onQuick={(text) => { setQuestion(text); questionRef.current?.focus() }}
+      onReview={() => void generateReview()}
+      onCards={() => void generateCards()}
+      onQuiz={() => void runTool('quiz')}
+      onOpenReview={onOpenReview}
+      onPersonalize={personalizeTutoring}
     />
   ) : null
 
@@ -793,21 +900,20 @@ export function StudyView({
           <header className="ws-center-head">
             <div>
               <div className="ws-crumb">AI 私教 · 对话式课堂</div>
-              <h2>把整份课件变成一门能对话的课</h2>
+              <h2>今天想学什么？</h2>
               <p className="quiet">
                 {selectedDoc
                   ? `当前选中：${selectedDoc.displayName}。左边选课程，或直接开课。`
-                  : '把课件导入进来，先建课程，再让老师把它拆成几讲。'}
+                  : '把课件交给老师，或者从左栏打开一门课，直接接着聊。'}
               </p>
             </div>
             <div className="ws-head-actions">
               <button className="ghost" onClick={() => setTeacherOpen(true)}>老师档案</button>
-              <button className="ghost" onClick={() => void runImport()} disabled={importing}>
-                {importing ? '正在导入…' : '导入课件'}
-              </button>
-              <button className="primary" onClick={() => void createSession()} disabled={busy !== null || !selectedDoc}>
-                {busy === 'create' ? '正在完整读懂并拆课…' : '完整读懂并拆课'}
-              </button>
+              {selectedDoc ? (
+                <button className="primary" onClick={() => void createSession()} disabled={busy !== null}>
+                  {busy === 'create' ? '正在完整读懂并拆课…' : '完整读懂并拆课'}
+                </button>
+              ) : null}
             </div>
           </header>
           {error ? <div className="banner bad">{error}</div> : null}
@@ -818,24 +924,35 @@ export function StudyView({
             </div>
           ) : null}
           <div className="ws-intro-scroll">
-            <div className="study-intro">
-              <section className="study-intro-main">
-                <h3>这一次，不是“识别 + 一键摘要”</h3>
-                <p>上传的课件会先被整份接住：文字、图片页、公式和图表说明一起读，作者、机构、版权、页眉页脚等非知识信息会被忽略。</p>
-                <div className="study-steps">
-                  <div><b>01</b><span>完整读懂</span><small>整份材料的文字与图像理解一起进入课程设计，不是逐页孤立摘要。</small></div>
-                  <div><b>02</b><span>按习惯拆课</span><small>你希望讲透、先定义还是先提问，都会进入拆课和讲解提示。</small></div>
-                  <div><b>03</b><span>一份课件一个对话</span><small>讲与讲之间只用一条细线分隔，追问不会散到很多个会话里。</small></div>
-                  <div><b>04</b><span>对照原页讲</span><small>老师讲题会指到 PPT/PDF 的第几页，回答旁挂整页和原句。</small></div>
+            <div className="ws-home-shell">
+              <div className="ws-home-mark">今天 · 等你开口</div>
+              <div className="ws-message assistant ws-home-message">
+                <span className="ws-avatar">师</span>
+                <div className="ws-bubble ws-home-bubble">
+                  <p>把课件发给我，我先整份读懂，再按你的习惯拆成几讲。你也可以从左栏打开一门课，直接接着聊。</p>
+                  <div className="ws-home-starters">
+                    <button onClick={() => void runImport()} disabled={importing}>
+                      <b>⇧</b>
+                      <span>导入课件<small>PDF / PPT / Word</small></span>
+                    </button>
+                    <button onClick={() => setCourseDialog({ mode: 'create', name: '' })}>
+                      <b>＋</b>
+                      <span>新建课程<small>先建一门课</small></span>
+                    </button>
+                  </div>
                 </div>
-              </section>
-              <aside className="study-habits">
-                <h3>你的学习习惯</h3>
-                <p className="quiet">{habitSummary(habits)}</p>
-                <label className="study-field">
-                  <span>称呼</span>
-                  <input value={habits.name} maxLength={16} placeholder="留空就用「你」" onChange={(event) => void patchHabits({ name: event.target.value })} />
-                </label>
+              </div>
+              <details className="ws-home-habits">
+                <summary>
+                  <span>你的学习习惯</span>
+                  <small>{habitSummary(habits)}</small>
+                  <em>调整</em>
+                </summary>
+                <div className="ws-home-habits-body">
+                  <label className="study-field">
+                    <span>称呼</span>
+                    <input value={habits.name} maxLength={16} placeholder="留空就用「你」" onChange={(event) => void patchHabits({ name: event.target.value })} />
+                  </label>
                 <div className="habit-group">
                   <span className="habit-label">节奏</span>
                   <div className="habit-row">
@@ -868,7 +985,9 @@ export function StudyView({
                     ))}
                   </div>
                 </div>
-              </aside>
+                </div>
+              </details>
+              <p className="ws-home-foot">课件只留在这台电脑；没有账号，没有云同步。</p>
             </div>
           </div>
         </main>
@@ -1353,21 +1472,40 @@ function ContextRail({
   detail,
   unit,
   open,
+  busy,
+  railBusy,
+  railNote,
+  reviewStats,
   onClose,
   onOpenMaterials,
-  onQuick,
+  onReview,
+  onCards,
+  onQuiz,
+  onOpenReview,
+  onPersonalize,
 }: {
   detail: StudySessionDetail
   unit: StudyUnit | null
   open: boolean
+  busy: boolean
+  railBusy: 'review' | 'cards' | null
+  railNote: string
+  reviewStats: ReviewSummary | null
   onClose: () => void
   onOpenMaterials: (focus: StudyToolKind | null) => void
-  onQuick: (text: string) => void
+  onReview: () => void
+  onCards: () => void
+  onQuiz: () => void
+  onOpenReview: () => void
+  onPersonalize: () => void
 }) {
   const artifacts = detail.artifacts
     .filter((artifact) => unit && (artifact.scope === `unit:${unit.ordinal}` || artifact.scope === 'course'))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .slice(0, 4)
+  const quiz = [...detail.artifacts].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).find((artifact) => artifact.kind === 'quiz')
+  const quizQuestions = quiz?.body.questions ?? []
+  const questionCount = quizQuestions.length
   const note = detail.teacherNote
   const pointPages = unit?.segments.map((segment) => pageNumberFromSource(segment.source)) ?? []
   const fallbackPage = unit ? pageNumberFromSource(unit.source) : null
@@ -1393,6 +1531,41 @@ function ContextRail({
         </p>
       </header>
 
+      <section className="ws-actions-card">
+        <div className="ws-card-head">
+          <h4>学习动作</h4>
+          <span>一键就做</span>
+        </div>
+        <div className="ws-action-grid">
+          <button disabled={busy || railBusy !== null} onClick={onReview}>
+            <span>▤</span>
+            <b>{railBusy === 'review' ? '正在生成…' : '复习资料'}</b>
+            <small>总结 + 大纲</small>
+          </button>
+          <button disabled={busy || railBusy !== null} onClick={onCards}>
+            <span>▦</span>
+            <b>{railBusy === 'cards' ? '正在生成…' : '一键卡片'}</b>
+            <small>从这一讲的知识点</small>
+          </button>
+          <button disabled={busy || railBusy !== null} onClick={onQuiz}>
+            <span>◫</span>
+            <b>题测</b>
+            <small>{questionCount ? `${questionCount} 道题` : '先答后判'}</small>
+          </button>
+          <button disabled={busy || railBusy !== null} onClick={onOpenReview}>
+            <span>↺</span>
+            <b>错题本</b>
+            <small>{reviewStats ? `${reviewStats.misses} 道错题` : '到点再练'}</small>
+          </button>
+          <button className="wide" disabled={busy || railBusy !== null} onClick={onPersonalize}>
+            <span>◎</span>
+            <b>个性化辅导</b>
+            <small>按你的学习习惯，先找最该补的一块</small>
+          </button>
+        </div>
+        {railNote ? <p className="ws-rail-note">{railNote}</p> : null}
+      </section>
+
       <div className="ws-context-scroll">
         <section className="ws-context-section ws-context-card">
           <div className="ws-card-head">
@@ -1411,6 +1584,24 @@ function ContextRail({
             </div>
           ) : <p className="quiet">这一讲还没有单独列知识点。</p>}
         </section>
+
+        {quizQuestions.length ? (
+          <section className="ws-context-section ws-context-card ws-quiz-card">
+            <div className="ws-card-head">
+              <h4>这一讲的题</h4>
+              <span>{quizQuestions.length} 道 · 先答后判</span>
+            </div>
+            <ol className="ws-quiz-list">
+              {quizQuestions.map((question, index) => (
+                <li key={question.id}>
+                  <span>{index + 1}</span>
+                  <p>{question.prompt}</p>
+                </li>
+              ))}
+            </ol>
+            <button className="ws-quiz-open" onClick={() => onOpenMaterials('quiz')}>去作答</button>
+          </section>
+        ) : null}
 
         <section className="ws-context-section ws-context-card">
           <div className="ws-card-head">
@@ -1466,15 +1657,6 @@ function ContextRail({
           <UsageSummary usage={detail.usage} />
         </section>
       </div>
-
-      <section className="ws-quick-panel">
-        <div className="ws-quick-label">想让我做点什么？</div>
-        <div className="ws-quick-chips">
-          <button onClick={() => onQuick('用三句话总结这一讲，并指到对应讲义页。')}>总结这一讲</button>
-          <button onClick={() => onQuick(unit ? `把第 ${unit.ordinal + 1} 讲的第 1 页原文和公式逐条讲清楚。` : '把这份课件最容易混的三个点讲清楚。')}>把这一页讲清楚</button>
-          <button onClick={() => onQuick('找原文：把这一讲里最关键的三个句子找出来。')}>找原文</button>
-        </div>
-      </section>
 
       <footer className="ws-context-brand">
         <b>灯下 · 本地优先</b>

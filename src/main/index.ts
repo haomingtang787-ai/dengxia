@@ -371,6 +371,79 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     )))
     return
   }
+  if (action === 'workspace-quiz') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(`(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`)
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('.ws-action-grid button')].find((item) => item.textContent.includes('题测')); button?.click(); return Boolean(button) })()`,
+    )
+    let count = 0
+    for (let i = 0; i < 80; i++) {
+      count = await win.webContents.executeJavaScript(`document.querySelectorAll('.ws-quiz-list li').length`)
+      if (count > 0) break
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+    console.log('[smoke] quiz', JSON.stringify({ count }))
+    if (count > 0) {
+      await win.webContents.executeJavaScript(`document.querySelector('.modal.course-materials .icon-btn')?.click()`)
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+    return
+  }
+  if (action === 'workspace-review') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(`(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`)
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('.ws-action-grid button')].find((item) => item.textContent.includes('复习资料')); button?.click(); return Boolean(button) })()`,
+    )
+    let note = ''
+    for (let i = 0; i < 80; i++) {
+      note = await win.webContents.executeJavaScript(
+        `(document.querySelector('.ws-rail-note')?.textContent || '').trim()`,
+      )
+      if (note.includes('已生成') || note.includes('没生成') || note.includes('没写成')) break
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+    const artifactCount = await win.webContents.executeJavaScript(
+      `document.querySelectorAll('.ws-context .ws-artifact-chip').length`,
+    )
+    console.log('[smoke] review', JSON.stringify({ note, artifactCount }))
+    return
+  }
+  if (action === 'workspace-context') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(`(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`)
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === '这一讲'); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    console.log('[smoke] context', await win.webContents.executeJavaScript(`Boolean(document.querySelector('.ws-action-grid'))`))
+    return
+  }
+  if (action === 'workspace-cards') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(`(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`)
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await win.webContents.executeJavaScript(
+      `(() => { if (document.querySelector('.ws-action-grid')) return true; const button = [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === '这一讲'); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const before = await win.webContents.executeJavaScript(`window.desk.teaching.cards.list()`)
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('.ws-action-grid button')].find((item) => item.textContent.includes('一键卡片')); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1600))
+    const after = await win.webContents.executeJavaScript(`window.desk.teaching.cards.list()`)
+    console.log('[smoke] cards', JSON.stringify({
+      clicked,
+      before: before?.ok ? before.data.items.length : 'error',
+      after: after?.ok ? after.data.items.length : 'error',
+    }))
+    return
+  }
   if (action === 'workspace-model-switch') {
     await new Promise((resolve) => setTimeout(resolve, 1200))
     await win.webContents.executeJavaScript(
