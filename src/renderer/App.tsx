@@ -881,9 +881,9 @@ export function App() {
           <div className="brand">
             <div className="brand-title">
               <svg className="brand-logo" viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="#1f9d80" d="M9 2.5h6v2h-2v4.1a6 6 0 0 1 4.2 5.7v2.2H6.8v-2.2a6 6 0 0 1 4.2-5.7V4.5H9v-2z" />
-                <path fill="#ffb84d" d="M11 15.6h2v2.2h-2z" />
-                <path fill="#173e3a" d="M10.2 18.6h3.6l-.5 2.2h-2.6z" />
+                <path style={{ fill: 'var(--c-primary)' }} d="M9 2.5h6v2h-2v4.1a6 6 0 0 1 4.2 5.7v2.2H6.8v-2.2a6 6 0 0 1 4.2-5.7V4.5H9v-2z" />
+                <path style={{ fill: 'var(--c-warning)' }} d="M11 15.6h2v2.2h-2z" />
+                <path style={{ fill: 'var(--c-primary-deep)' }} d="M10.2 18.6h3.6l-.5 2.2h-2.6z" />
               </svg>
               <strong>灯下</strong>
             </div>

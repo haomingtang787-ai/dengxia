@@ -62,7 +62,7 @@ export function parseStudyPlan(
   if (!overview) throw new ArgumentError('模型返回的课程设计缺少整份材料总览。')
   const rawUnits = list(root.units)
   if (rawUnits.length === 0) throw new ArgumentError('模型返回的课程设计没有小讲。')
-  if (rawUnits.length > 24) throw new ArgumentError('模型返回的小讲超过 24 个，请重试。')
+  if (rawUnits.length > 6) throw new ArgumentError('模型返回的小讲超过 6 个；第一次只做导览，最多 6 讲，请重试。')
 
   const units = rawUnits.map((item, index) => {
     const row = record(item)
@@ -88,9 +88,9 @@ export function parseStudyPlan(
     return {
       title,
       source,
-      minutes: clampInt(row.minutes, 3, 15, 6),
-      keyPoints: stringList(row.keyPoints).slice(0, 8),
-      segments: segments.slice(0, 12),
+      minutes: clampInt(row.minutes, 3, 12, 6),
+      keyPoints: stringList(row.keyPoints).slice(0, 4),
+      segments: segments.slice(0, 6),
     }
   })
 

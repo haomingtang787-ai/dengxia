@@ -1,0 +1,46 @@
+/* 灯下 1.0.4：全站唯一调色板。所有文稿、课堂、复习、设置、弹窗都从这里取色。 */
+:root {
+  --c-ink: #23332a;
+  --c-ink-rgb: 35, 51, 42;
+  --c-ink-soft: #3f5146;
+  --c-ink-soft-rgb: 63, 81, 70;
+  --c-muted: #68796c;
+  --c-muted-rgb: 104, 121, 108;
+  --c-faint: #8e9b91;
+  --c-faint-rgb: 142, 155, 145;
+  --c-paper: #f5f6f0;
+  --c-paper-rgb: 245, 246, 240;
+  --c-paper-soft: #eff2e9;
+  --c-paper-soft-rgb: 239, 242, 233;
+  --c-surface: #ffffff;
+  --c-surface-rgb: 255, 255, 255;
+  --c-surface-soft: #f8faf4;
+  --c-surface-soft-rgb: 248, 250, 244;
+  --c-line: #dfe6da;
+  --c-line-rgb: 223, 230, 218;
+  --c-line-strong: #cfd8c9;
+  --c-line-strong-rgb: 207, 216, 201;
+  --c-primary: #21483c;
+  --c-primary-rgb: 33, 72, 60;
+  --c-primary-hover: #2a5c4a;
+  --c-primary-hover-rgb: 42, 92, 74;
+  --c-primary-deep: #163a30;
+  --c-primary-deep-rgb: 22, 58, 48;
+  --c-primary-soft: #e8f0e9;
+  --c-primary-soft-rgb: 232, 240, 233;
+  --c-success: #3f765b;
+  --c-success-rgb: 63, 118, 91;
+  --c-success-soft: #eaf3ea;
+  --c-success-soft-rgb: 234, 243, 234;
+  --c-danger: #9b433c;
+  --c-danger-rgb: 155, 67, 60;
+  --c-danger-soft: #fbeeed;
+  --c-danger-soft-rgb: 251, 238, 237;
+  --c-warning: #8a6a2f;
+  --c-warning-rgb: 138, 106, 47;
+  --c-warning-soft: #f7f1df;
+  --c-warning-soft-rgb: 247, 241, 223;
+
+  --c-overlay: rgba(22, 36, 28, 0.32);
+  --c-shadow: rgba(28, 54, 44, 0.12);
+}

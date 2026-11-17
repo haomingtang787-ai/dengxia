@@ -158,7 +158,7 @@ function fakeFetch() {
 }
 
 describe('AI 私教学习会话', () => {
-  it('完整读取整份材料，按习惯拆成逐句讲稿并保存开场', async () => {
+  it('完整读取整份材料，按习惯生成导览讲稿并保存开场', async () => {
     configure()
     const fetchImpl = fakeFetch()
     const service = await configuredService(fetchImpl as unknown as typeof fetch)
@@ -183,7 +183,7 @@ describe('AI 私教学习会话', () => {
     expect(planCall.messages[0].content).toContain('课程设计')
     expect(planCall.messages[1].content).toContain('小明')
     expect(planCall.messages[1].content).toContain('光合作用发生在叶绿体')
-    expect(planCall.messages[1].content).toContain('逐句')
+    expect(planCall.messages[1].content).toContain('导览')
   })
 
   it('多轮对话会带上课程、本讲和已有消息，并保存用户与老师回复', async () => {
@@ -440,19 +440,22 @@ describe('AI 私教学习会话', () => {
     expect(planBody).toContain('第 1 段')
   })
 
-  it('80 页课件允许拆出超过 12 讲，最多 24 讲', async () => {
+  it('首版最多 6 讲，超过 6 讲会重试成导览', async () => {
     configure()
-    const units = Array.from({ length: 13 }, (_, index) => ({
+    const units = Array.from({ length: 7 }, (_, index) => ({
       ...PLAN.units[0],
       title: `第 ${index + 1} 讲`,
       source: `第 ${index + 1} 页`,
     }))
-    const plan = { ...PLAN, units }
+    const overlong = { ...PLAN, units }
+    let planCalls = 0
     const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body))
       const system = String(body.messages?.[0]?.content ?? '')
       if (system.includes('课程设计')) {
-        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }), {
+        planCalls += 1
+        const reply = planCalls === 1 ? overlong : PLAN
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(reply) } }] }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })
@@ -465,7 +468,8 @@ describe('AI 私教学习会话', () => {
     const service = await configuredService(fetchImpl as unknown as typeof fetch)
     const created = await service.create({ requestId: randomUUID(), documentVersionId: VERSION_ID, title: '光合作用课件' })
     expect(created.ok).toBe(true)
-    if (created.ok) expect(created.data.units).toHaveLength(13)
+    if (created.ok) expect(created.data.units.length).toBeLessThanOrEqual(6)
+    expect(planCalls).toBe(2)
   })
 
   it('没有配置模型时不给开始，提示先配置', async () => {

@@ -271,7 +271,7 @@ export class StudyService {
           digests = renderDigests(outcome.digests)
           chunkCount = outcome.digests.length
           warnings.push(
-            `这份材料约 ${material.text.length} 字，已按页分成 ${chunkCount} 段逐段读懂，再据此拆课；课程覆盖全部段落。`,
+            `这份材料约 ${material.text.length} 字，已按页分成 ${chunkCount} 段逐段读懂；这次先做导览课，主干讲清楚，具体段落会在你追问时展开。`,
           )
           warnings.push(...outcome.warnings)
           // 材料没变时这份理解结果直接复用，重开课、换习惯再开一门都不用重新扣读材料的钱。

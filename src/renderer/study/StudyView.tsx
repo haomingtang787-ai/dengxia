@@ -56,13 +56,13 @@ function progressText(progress: StudyProgress | null): string {
   }
   if (progress?.phase === 'reading') {
     return progress.total > 0
-      ? `正在逐段读懂整份课件：已完成 ${progress.done}/${progress.total} 段，读完后马上拆课。`
+      ? `正在逐段读懂整份课件：已完成 ${progress.done}/${progress.total} 段，读完后先生成导览课。`
       : '正在按页切分这份长课件，准备逐段读懂。'
   }
   if (progress?.phase === 'planning') {
-    return '整份材料已读懂，正在按你的习惯设计课程、写逐句讲稿。'
+    return '正在整理导览课：先搭主干，再写导览讲稿。'
   }
-  return '正在完整接收整份材料：逐页取文字或让 AI 读图，再设计课程、写逐句讲稿。'
+  return '正在完整接收整份材料：逐页取文字或让 AI 读图，再设计导览课、写导览讲稿。'
 }
 
 function habitSummary(habits: Habits): string {
@@ -594,7 +594,7 @@ export function StudyView({
       return
     }
     if (configured === false) {
-      notify('info', '还没有配置模型。先填好模型和 API Key，再让老师完整读懂这份课件。')
+      notify('info', '还没有配置模型。先填好模型和 API Key，再让老师读懂并生成导览课。')
       onOpenSettings()
       return
     }
@@ -627,7 +627,7 @@ export function StudyView({
       setExpandedCourses((current) => new Set(current).add(result.data.courseId!))
     }
     await refreshCourses()
-    notify('info', `AI 已读完 ${selectedDoc.displayName}，拆成 ${result.data.units.length} 讲。`)
+    notify('info', `AI 已读完 ${selectedDoc.displayName}，先给你 ${result.data.units.length} 讲导览；想细讲哪一段，直接在下面追问。`)
     setBusy(null)
     setProgress(null)
   }
@@ -987,7 +987,7 @@ export function StudyView({
                   disabled={busy !== null || !selectedReady}
                   title={!selectedReady ? '等这份课件解析完成后再拆课' : undefined}
                 >
-                  {!selectedReady ? '等解析完成' : busy === 'create' ? '正在完整读懂并拆课…' : '完整读懂并拆课'}
+                  {!selectedReady ? '等解析完成' : busy === 'create' ? '正在读懂并生成导览…' : '生成导览课'}
                 </button>
               ) : null}
             </div>
@@ -1012,7 +1012,7 @@ export function StudyView({
               <div className="ws-message assistant ws-home-message">
                 <span className="ws-avatar">师</span>
                 <div className="ws-bubble ws-home-bubble">
-                  <p>把课件发给我，我先整份读懂，再按你的习惯拆成几讲。你也可以从左栏打开一门课，直接接着聊。</p>
+                  <p>把课件发给我，我先整份读懂，给你一版导览；想细讲哪一段，再直接在下面追问。</p>
                   <div className="ws-home-starters">
                     <button onClick={() => void runImport()} disabled={importing}>
                       <b>⇧</b>
@@ -1196,8 +1196,9 @@ export function StudyView({
           <div className="ws-composer">
             <div className="ws-composer-box">
               <div className="ws-composer-quick">
-                <span>听不下去就换讲法</span>
+                <span>先导览，想细就展开</span>
                 <button onClick={() => quickAsk('这一段再讲通俗一点，多用一个生活里的例子。')}>再通俗一点</button>
+                <button onClick={() => quickAsk('这一讲刚才是导览，请把这一讲展开讲细一点，先讲最关键的门槛和易错处，不要一次把整份材料倒完。')}>细讲这一讲</button>
                 <button onClick={() => quickAsk('这里再举一个具体例子，最好接着这一讲的讲义页说。')}>举个例子</button>
                 <button onClick={() => quickAsk('别继续讲了，直接考我这一讲的两个核心问题。')}>直接考我</button>
               </div>
