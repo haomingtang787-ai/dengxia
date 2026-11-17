@@ -75,6 +75,17 @@ function pageNumberFromSource(source: string): number | null {
   return Number(match[1] ?? match[2])
 }
 
+/** 范围页（第 3–5 页 / p.2–p.4）不能猜成第一页；只有单页来源才算可回原页。 */
+function singlePageNumber(source: string): number | null {
+  if (
+    /(?:第\s*)?\d+\s*页?\s*(?:[–—~～-]|至)\s*(?:第\s*)?\d+\s*页/i.test(source)
+    || /p\.?\s*\d+\s*(?:[–—~～-]|至)\s*p\.?\s*\d+/i.test(source)
+  ) {
+    return null
+  }
+  return pageNumberFromSource(source)
+}
+
 export type StudyServiceOptions = {
   db: AppDatabase
   settings: SettingsStore
@@ -516,9 +527,18 @@ export class StudyService {
         const prompt = buildStudySummaryToolPrompt({ title: session.title, material, unit, habits })
         const text = (await client.complete(prompt.system, prompt.user, 2200, 'disabled', 'tool-summary')).trim()
         if (!text) throw new AiError('AI_FAILED', '模型没有返回总结。')
+        const pages = this.citationPages(session.document_version_id)
+        const citations = citationsForUnits(units, input.unitOrdinal).map((citation) => ({
+          ...citation,
+          pageNumber: this.pageNumberForQuote(
+            citation.source,
+            units.filter((item) => item.ordinal === citation.unitOrdinal),
+            pages,
+          ),
+        }))
         this.saveToolArtifact(session.id, 'summary', scope, unit ? `总结 · ${unit.title}` : '整门课总结', {
           text,
-          citations: citationsForUnits(units, input.unitOrdinal),
+          citations,
         }, stamp)
         return ok(requestId, this.detail(session.id))
       }
@@ -528,11 +548,13 @@ export class StudyService {
         const prompt = buildStudyQuizPrompt({ title: session.title, material, unit, habits })
         const raw = await client.complete(prompt.system, prompt.user, 2200, 'disabled', 'tool-quiz')
         const parsed = parseStudyQuiz(raw)
+        const pages = this.citationPages(session.document_version_id)
         const questions: StudyQuizQuestion[] = parsed.questions.map((question) => ({
           id: randomUUID(),
           prompt: question.prompt,
           hint: question.hint,
           source: question.source,
+          pageNumber: this.pageNumberForQuote(question.source, units, pages),
         }))
         this.saveToolArtifact(session.id, 'quiz', scope, unit ? `题测 · ${unit.title}` : '整门课题测', {
           questions,
@@ -565,7 +587,7 @@ export class StudyService {
         const grade = parseQuizGrade(raw)
         const answerMap = new Map(input.answers.map((answer) => [answer.questionId, answer.answer]))
         const unitOrdinal = unit?.ordinal ?? -1
-        const pageNumber = pageNumberFromSource(unit?.source ?? '')
+        const unitPageNumber = singlePageNumber(unit?.source ?? '')
         // 逐题结果才落账；模型没按契约回 results 时，至少把这次缺口记成一条可重练的错题，避免题白做。
         if (grade.results.length > 0) {
           // 旧的“整次缺口”聚合错题被逐题结果取代，先关掉，避免重复。
@@ -588,7 +610,8 @@ export class StudyService {
               answer,
               explain: result.explain || grade.feedback,
               source: question.source,
-              page_number: pageNumber,
+              // 题目自己带页号时优先用它；多页小讲不能把整讲的第一页当成这道题的页。
+              page_number: question.pageNumber ?? unitPageNumber,
               created_at: stamp,
               last_practiced_at: null,
               resolved_at: null,
@@ -606,7 +629,7 @@ export class StudyService {
             answer: '',
             explain: grade.feedback,
             source: unit?.source ?? '',
-            page_number: pageNumber,
+            page_number: unitPageNumber,
             created_at: stamp,
             last_practiced_at: null,
             resolved_at: null,
@@ -622,6 +645,7 @@ export class StudyService {
           graded: true,
           feedback: grade.feedback,
           gaps: grade.gaps,
+          results: grade.results,
         }, stamp)
         return ok(requestId, this.detail(session.id))
       }
@@ -1003,6 +1027,19 @@ export class StudyService {
     }
     this.store.createCourse(course)
     return course.courseId
+  }
+
+  private pageNumberForQuote(quote: string, units: StudyUnit[], pages: CitationPage[]): number | null {
+    const explicit = singlePageNumber(quote)
+    if (explicit) return explicit
+    const normalized = normalizeText(quote)
+    if (normalized) {
+      const page = pages.find((item) => normalizeText(item.text).includes(normalized))
+      if (page) return page.pageNumber
+    }
+    const unit = units.find((item) => item.segments.some((segment) => normalizeText(segment.source) === normalized))
+      ?? (units.length === 1 ? units[0] : null)
+    return unit ? singlePageNumber(unit.source) : null
   }
 
   private citationPages(versionId: string): CitationPage[] {

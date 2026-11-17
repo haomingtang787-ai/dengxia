@@ -465,6 +465,172 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 500))
     return
   }
+  if (action === 'tool-page') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('整份课件')); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    let chips = await win.webContents.executeJavaScript(`document.querySelectorAll('.study-tool-cite').length`)
+    if (chips === 0) {
+      await win.webContents.executeJavaScript(
+        `(() => { const button = [...document.querySelectorAll('.study-tool-actions button')].find((item) => item.textContent.includes('总结这一讲')); button?.click(); return Boolean(button) })()`,
+      )
+      for (let i = 0; i < 40; i++) {
+        chips = await win.webContents.executeJavaScript(`document.querySelectorAll('.study-tool-cite').length`)
+        if (chips > 0) break
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+    }
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => { const button = document.querySelector('.study-tool-cite'); button?.scrollIntoView({ block: 'center' }); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const peek = await win.webContents.executeJavaScript(
+      `(() => { const modal = document.querySelector('.ws-peek'); return {
+        open: Boolean(modal),
+        title: modal?.querySelector('h2')?.textContent ?? '',
+        image: Boolean(modal?.querySelector('.ws-peek-image img')),
+        box: Boolean(modal?.querySelector('.ws-cite-box')),
+        quote: (modal?.querySelector('blockquote')?.innerText ?? '').slice(0, 80),
+      } })()`,
+    )
+    console.log('[smoke] tool-page', JSON.stringify({ chips, clicked, ...peek }))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
+  if (action === 'quiz-page') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('整份课件')); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('.study-tool-actions button')].find((item) => item.textContent.includes('考考我这讲')); button?.click(); return Boolean(button) })()`,
+    )
+    let chips = 0
+    for (let i = 0; i < 50; i++) {
+      chips = await win.webContents.executeJavaScript(`document.querySelectorAll('.study-tool-quiz-question .study-tool-cite').length`)
+      if (chips > 0) break
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => { const button = document.querySelector('.study-tool-quiz-question .study-tool-cite'); button?.scrollIntoView({ block: 'center' }); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const peek = await win.webContents.executeJavaScript(
+      `(() => { const modal = document.querySelector('.ws-peek'); return {
+        open: Boolean(modal),
+        title: modal?.querySelector('h2')?.textContent ?? '',
+        image: Boolean(modal?.querySelector('.ws-peek-image img')),
+        box: Boolean(modal?.querySelector('.ws-cite-box')),
+        quote: (modal?.querySelector('blockquote')?.innerText ?? '').slice(0, 80),
+      } })()`,
+    )
+    console.log('[smoke] quiz-page', JSON.stringify({ chips, clicked, ...peek }))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
+  if (action === 'quiz-grade-page') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('整份课件')); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const filled = await win.webContents.executeJavaScript(
+      `(() => {
+        const areas = [...document.querySelectorAll('.study-tool-quiz-question textarea')]
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+        areas.forEach((area) => {
+          setter.call(area, '内积为零说明两个向量垂直，所以正交；交换位置内积不变；零向量没有方向，通常不讨论它和任意向量正交。')
+          area.dispatchEvent(new Event('input', { bubbles: true }))
+        })
+        return areas.length
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const submitted = await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('.study-tool-card button')].find((item) => item.textContent.includes('交给老师判')); button?.click(); return Boolean(button) })()`,
+    )
+    let results = 0
+    for (let i = 0; i < 90; i++) {
+      results = await win.webContents.executeJavaScript(`document.querySelectorAll('.study-tool-result').length`)
+      if (results > 0) break
+      await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => { const button = document.querySelector('.study-tool-result .study-tool-cite'); button?.scrollIntoView({ block: 'center' }); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const peek = await win.webContents.executeJavaScript(
+      `(() => { const modal = document.querySelector('.ws-peek'); return {
+        open: Boolean(modal),
+        title: modal?.querySelector('h2')?.textContent ?? '',
+        image: Boolean(modal?.querySelector('.ws-peek-image img')),
+        quote: (modal?.querySelector('blockquote')?.innerText ?? '').slice(0, 80),
+      } })()`,
+    )
+    console.log('[smoke] quiz-grade-page', JSON.stringify({ filled, submitted, results, clicked, ...peek }))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
+  if (action === 'quiz-result-view') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent.includes('整份课件')); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const results = await win.webContents.executeJavaScript(
+      `(() => { const card = [...document.querySelectorAll('.study-tool-card')].find((item) => item.textContent.includes('题测')); card?.scrollIntoView({ block: 'start' }); return document.querySelectorAll('.study-tool-result').length })()`,
+    )
+    console.log('[smoke] quiz-result-view', JSON.stringify({ results }))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
+  if (action === 'review-page') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const button = [...document.querySelectorAll('button')].find((item) => item.textContent.trim() === '复习'); button?.click(); return Boolean(button) })()`,
+    )
+    let links = 0
+    for (let i = 0; i < 30; i++) {
+      links = await win.webContents.executeJavaScript(`document.querySelectorAll('.review-page-link').length`)
+      if (links > 0) break
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => { const button = document.querySelector('.review-page-link'); button?.scrollIntoView({ block: 'center' }); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const peek = await win.webContents.executeJavaScript(
+      `(() => { const modal = document.querySelector('.ws-peek'); return {
+        open: Boolean(modal),
+        title: modal?.querySelector('h2')?.textContent ?? '',
+        image: Boolean(modal?.querySelector('.ws-peek-image img')),
+        box: Boolean(modal?.querySelector('.ws-cite-box')),
+        quote: (modal?.querySelector('blockquote')?.innerText ?? '').slice(0, 80),
+      } })()`,
+    )
+    console.log('[smoke] review-page', JSON.stringify({ links, clicked, ...peek }))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
   if (action === 'review-open') {
     await new Promise((resolve) => setTimeout(resolve, 1200))
     await win.webContents.executeJavaScript(

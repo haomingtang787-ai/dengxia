@@ -25,7 +25,8 @@ import { MathText } from '../components/MathText'
 import { DEFAULT_AI } from '../../shared/ai'
 import { TeacherProfile } from './TeacherProfile'
 import { StudyTools } from './StudyTools'
-import { citationPage, evidenceLayout } from './evidence'
+import { PagePeek } from './PagePeek'
+import { bboxStyle, citationPage, evidenceLayout } from './evidence'
 import {
   AVOID_OPTIONS,
   DEFAULT_HABITS,
@@ -92,15 +93,6 @@ function stripCoursePrefix(value: string, courseName: string): string {
   if (!courseName) return value
   const escaped = courseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   return value.replace(new RegExp(`^${escaped}[-—– ]*`), '')
-}
-
-function bboxStyle(bbox: [number, number, number, number]): { left: string; top: string; width: string; height: string } {
-  return {
-    left: `${Math.max(0, Math.min(1, bbox[0])) * 100}%`,
-    top: `${Math.max(0, Math.min(1, bbox[1])) * 100}%`,
-    width: `${Math.max(0, Math.min(1, bbox[2])) * 100}%`,
-    height: `${Math.max(0, Math.min(1, bbox[3])) * 100}%`,
-  }
 }
 
 export function StudyView({
@@ -1222,6 +1214,8 @@ export function StudyView({
           onToolFocus={setToolFocus}
           onTool={runTool}
           unitOrdinal={activeUnit?.ordinal ?? null}
+          pages={pages}
+          onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
           onFinish={() => void finishCourse()}
           onNoteChange={(note) => setDetail((current) => current ? { ...current, teacherNote: note } : current)}
         />
@@ -1383,45 +1377,6 @@ function CitationCard({
         </p>
       </div>
     </article>
-  )
-}
-
-function PagePeek({
-  citation,
-  page,
-  onClose,
-}: {
-  citation: StudySlideCitation
-  page: PageView | null
-  onClose: () => void
-}) {
-  return (
-    <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <div className="modal ws-peek">
-        <header>
-          <div>
-            <h2>对照讲义 p.{citation.pageNumber}</h2>
-            <p className="quiet">
-              {citation.bbox
-                ? '整页原图，不裁剪；黄色框是老师刚才引用的位置。'
-                : '定位到页：整页原图，不裁剪；这一句未能逐字对上，所以不画框。'}
-            </p>
-          </div>
-          <button className="icon-btn" title="关闭" onClick={onClose}>×</button>
-        </header>
-        <div className="ws-peek-body">
-          {page?.previewResourceId ? (
-            <div className="ws-peek-image">
-              <img src={`app-resource://${page.previewResourceId}`} alt={`第 ${citation.pageNumber} 页`} />
-              {citation.bbox ? <span className="ws-cite-box" style={bboxStyle(citation.bbox)} /> : null}
-            </div>
-          ) : (
-            <div className="ws-peek-noimg">这一页没有页面图，下面保留原句。</div>
-          )}
-          <blockquote>{citation.quote}</blockquote>
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -1863,6 +1818,8 @@ function CourseMaterials({
   onToolFocus,
   onTool,
   unitOrdinal,
+  pages,
+  onOpenPage,
   onFinish,
   onNoteChange,
 }: {
@@ -1875,6 +1832,8 @@ function CourseMaterials({
   onToolFocus: (tool: StudyToolKind | null) => void
   onTool: (tool: StudyToolKind, payload?: { query?: string; answer?: string; answers?: StudyQuizAnswer[] }) => Promise<boolean>
   unitOrdinal: number | null
+  pages: PageView[]
+  onOpenPage: (citation: StudySlideCitation, page: PageView | null) => void
   onFinish: () => void
   onNoteChange: (note: StudySessionDetail['teacherNote']) => void
 }) {
@@ -1940,6 +1899,8 @@ function CourseMaterials({
           <StudyTools
             detail={detail}
             unitOrdinal={unitOrdinal}
+            pages={pages}
+            onOpenPage={onOpenPage}
             focus={toolFocus}
             busy={busy}
             onFocus={onToolFocus}

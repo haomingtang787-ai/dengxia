@@ -247,6 +247,7 @@ describe('0.7.1 工具与落点', () => {
     if (!first.ok) return
     const firstArtifact = first.data.artifacts.find((item) => item.kind === 'summary' && item.scope === 'unit:1')
     expect(firstArtifact?.body.text).toContain('存储层次')
+    expect(firstArtifact?.body.citations?.[0]?.pageNumber).toBe(3)
 
     const second = await app.tool({ sessionId, tool: 'summary', unitOrdinal: 1 })
     expect(second.ok).toBe(true)
@@ -268,6 +269,10 @@ describe('0.7.1 工具与落点', () => {
         return JSON.stringify({
           feedback: '第一题抓住了漏电，第二题漏了面积代价。',
           gaps: ['SRAM 的面积代价没有说'],
+          results: [
+            { index: 1, correct: true, explain: '漏电和刷新讲对了。' },
+            { index: 2, correct: false, explain: 'SRAM 的面积代价没有说。' },
+          ],
         })
       }
       return '{}'
@@ -278,6 +283,7 @@ describe('0.7.1 工具与落点', () => {
     const artifact = quiz.data.artifacts.find((item) => item.kind === 'quiz' && item.scope === 'unit:1')
     expect(artifact?.body.questions?.length).toBe(2)
     expect(artifact?.body.questions?.[0]).not.toHaveProperty('answer')
+    expect(artifact?.body.questions?.[0]?.pageNumber).toBe(3)
     expect(artifact?.body.graded).toBe(false)
 
     const graded = await app.tool({
@@ -295,6 +301,14 @@ describe('0.7.1 工具与落点', () => {
     expect(updated?.body.graded).toBe(true)
     expect(updated?.body.feedback).toContain('漏电')
     expect(updated?.body.questions?.length).toBe(2)
+    expect(updated?.body.questions?.[1]?.pageNumber).toBe(3)
+    expect(updated?.body.results).toHaveLength(2)
+    expect(updated?.body.results?.[1]?.explain).toContain('面积代价')
+    const miss = db.get<{ page_number: number | null }>(
+      'SELECT page_number FROM study_misses WHERE session_id = ? AND question_id = ?',
+      sessionId, artifact!.body.questions![1]!.id,
+    )
+    expect(miss?.page_number).toBe(3)
   })
 
   it('teachback 空答案拒绝；有缺口时写入 gaps', async () => {

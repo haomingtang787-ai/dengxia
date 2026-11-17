@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PageView } from '../src/shared/contract'
-import { citationPage, evidenceLayout } from '../src/renderer/study/evidence'
+import { citationPage, evidenceLayout, pageForPageNumber, toolCitation } from '../src/renderer/study/evidence'
 import type { StudySlideCitation } from '../src/shared/study'
 
 function citation(pageNumber: number, pageId: string | null = `page-${pageNumber}`): StudySlideCitation {
@@ -50,5 +50,21 @@ describe('1.0.1 页证据展示', () => {
 
   it('找不到页时返回 null，不伪造页图', () => {
     expect(citationPage(citation(8, null), [page('page-a', 0)])).toBeNull()
+  })
+
+  it('生成物按页号找页；没有页号的原文不伪造页码', () => {
+    const pages = [page('page-a', 0), page('page-b', 1)]
+    expect(pageForPageNumber(pages, 2)?.pageId).toBe('page-b')
+    expect(pageForPageNumber(pages, null)).toBeNull()
+    expect(pageForPageNumber(pages, 0)).toBeNull()
+  })
+
+  it('生成物页证据没有 bbox，绝不画假框', () => {
+    const pages = [page('page-b', 1)]
+    const generated = toolCitation(2, 'SRAM 用触发器存储一位。', pageForPageNumber(pages, 2))
+    expect(generated.pageNumber).toBe(2)
+    expect(generated.pageId).toBe('page-b')
+    expect(generated.bbox).toBeNull()
+    expect(generated.blockId).toBeNull()
   })
 })

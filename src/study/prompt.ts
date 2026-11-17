@@ -260,7 +260,8 @@ const QUIZ_SYSTEM = [
   '只依据给定课程材料与原文，不要出材料没有的题。',
   '只输出一个 JSON 对象，不要 markdown 代码块，不要解释。',
   '字段：questions[{prompt, hint, source}]。',
-  'questions 1 到 3 道；prompt 是问题，hint 是一句提示，source 必须逐字引用材料中的原句。',
+  'questions 1 到 3 道；prompt 是问题，hint 是一句提示，source 必须逐字复制材料中“原文：”后面的完整一句，不能拿“必须掌握”的概括、关键词或自己的话代替。',
+  '如果找不到能逐字复制的原句，就不要出这道题。',
   '题目要考理解、因果、对比或应用，不要只问“标题是什么”。',
   '不要输出答案、选项或解析；学生先答，答完再判。',
 ].join('\n')
@@ -317,7 +318,7 @@ export function buildStudyQuizPrompt(input: {
       habitBrief(input.habits),
       `课程：${input.title}`,
       input.unit ? `范围：第 ${input.unit.ordinal + 1} 讲《${input.unit.title}》` : '范围：整门课',
-      `请出 ${count} 道主动回忆题。`,
+      `请出 ${count} 道主动回忆题。每道题的 source 只从下面“原文：”这一行整句复制，不要改写，也不要拿“必须掌握”的概括代替。`,
       '材料：',
       input.material,
     ].join('\n\n'),

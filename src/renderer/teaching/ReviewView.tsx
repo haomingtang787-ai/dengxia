@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DayMarkView, DueCardItem, MissItem, ReviewSummary, TeachingCard } from '../../shared/teaching'
-import type { StudyMissItem } from '../../shared/study'
-import type { ReviewSettingsView } from '../../shared/contract'
+import type { StudyMissItem, StudySlideCitation } from '../../shared/study'
+import type { PageView, ReviewSettingsView } from '../../shared/contract'
 import { MathText } from '../components/MathText'
+import { PagePeek } from '../study/PagePeek'
 
 type Notify = (tone: 'info' | 'bad', text: string) => void
 
@@ -32,6 +33,9 @@ export function ReviewView({
   const [misses, setMisses] = useState<MissItem[]>([])
   const [studyMisses, setStudyMisses] = useState<StudyMissItem[]>([])
   const [studyMissCount, setStudyMissCount] = useState(0)
+  const [studyPages, setStudyPages] = useState<Record<string, PageView[]>>({})
+  const [studyPeek, setStudyPeek] = useState<{ citation: StudySlideCitation; page: PageView | null } | null>(null)
+  const loadedStudySessions = useRef(new Set<string>())
   const [cards, setCards] = useState<TeachingCard[]>([])
   const [today, setToday] = useState<DayMarkView | null>(null)
   const [summary, setSummary] = useState<ReviewSummary | null>(null)
@@ -72,6 +76,26 @@ export function ReviewView({
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  // 课堂错题只存了页码；按 session 取一次页图，点 p.N 才能真的回到原页。
+  useEffect(() => {
+    if (!api || studyMisses.length === 0) return
+    const pending = [...new Set(studyMisses.map((miss) => miss.sessionId))]
+      .filter((sessionId) => !loadedStudySessions.current.has(sessionId))
+    if (pending.length === 0) return
+    for (const sessionId of pending) loadedStudySessions.current.add(sessionId)
+    let cancelled = false
+    void Promise.all(pending.map(async (sessionId) => {
+      const session = await api.study.get({ sessionId })
+      if (!session.ok) return [sessionId, []] as const
+      const pages = await api.documents.pages({ documentVersionId: session.data.documentVersionId, offset: 0, limit: 200 })
+      return [sessionId, pages.ok ? pages.data.items : []] as const
+    })).then((entries) => {
+      if (cancelled) return
+      setStudyPages((state) => ({ ...state, ...Object.fromEntries(entries) }))
+    })
+    return () => { cancelled = true }
+  }, [api, studyMisses])
 
   // 每天最多提醒一次；只在有到点卡（或错题超过目标）且目标没完成时提醒。
   useEffect(() => {
@@ -158,6 +182,21 @@ export function ReviewView({
       return next
     })
     await refresh()
+  }
+
+  function openStudyMissPage(miss: StudyMissItem) {
+    if (!miss.pageNumber) return
+    const page = (studyPages[miss.sessionId] ?? []).find((item) => item.ordinal === miss.pageNumber! - 1) ?? null
+    setStudyPeek({
+      citation: {
+        pageNumber: miss.pageNumber,
+        pageId: page?.pageId ?? null,
+        quote: miss.source || miss.prompt,
+        blockId: null,
+        bbox: null,
+      },
+      page,
+    })
   }
 
   async function toggleSuspend(card: TeachingCard) {
@@ -338,10 +377,18 @@ export function ReviewView({
           {studyMisses.map((miss) => (
             <div key={`study:${miss.id}`} className="miss">
               <p className="miss-prompt"><MathText text={miss.prompt} /></p>
-              <p className="quiet">
-                课堂题测 · {miss.unitOrdinal >= 0 ? `第 ${miss.unitOrdinal + 1} 讲` : '整门课'}{miss.pageNumber ? ` · p.${miss.pageNumber}` : ''}
-                {miss.source ? ` · 原句：${miss.source}` : ''}
-              </p>
+              <div className="review-miss-source">
+                <span className="quiet">
+                  课堂题测 · {miss.unitOrdinal >= 0 ? `第 ${miss.unitOrdinal + 1} 讲` : '整门课'}{miss.pageNumber ? ` · p.${miss.pageNumber}` : ''}
+                  {miss.source ? ` · 原句：${miss.source}` : ''}
+                </span>
+                {miss.pageNumber ? (
+                  <button className="study-tool-cite review-page-link" onClick={() => openStudyMissPage(miss)}>
+                    <b>p.{miss.pageNumber}</b>
+                    <span>回原页</span>
+                  </button>
+                ) : null}
+              </div>
               {revealedMiss[miss.id] ? (
                 <>
                   <p className="quiet">你当时答：{miss.answer || '（未作答）'}</p>
@@ -361,6 +408,10 @@ export function ReviewView({
           ))}
         </div>
       </section>
+
+      {studyPeek ? (
+        <PagePeek citation={studyPeek.citation} page={studyPeek.page} onClose={() => setStudyPeek(null)} />
+      ) : null}
 
       {editor ? (
         <div className="modal-overlay" onClick={() => setEditor(null)}>

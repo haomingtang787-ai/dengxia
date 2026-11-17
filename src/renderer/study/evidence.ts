@@ -20,3 +20,31 @@ export function citationPage(citation: StudySlideCitation, pages: PageView[]): P
     ?? pages.find((page) => page.ordinal === citation.pageNumber - 1)
     ?? null
 }
+
+/** 按页码找页；题测/总结只有页号，没有 block locator，所以不画框。 */
+export function pageForPageNumber(pages: PageView[], pageNumber: number | null | undefined): PageView | null {
+  if (!pageNumber || pageNumber < 1) return null
+  return pages.find((page) => page.ordinal === pageNumber - 1) ?? null
+}
+
+/** 生成物里的页证据只有“回到这一页”，没有可逐字对上的 bbox。 */
+export function toolCitation(pageNumber: number, quote: string, page: PageView | null): StudySlideCitation {
+  return {
+    pageNumber,
+    pageId: page?.pageId ?? null,
+    quote,
+    blockId: null,
+    bbox: null,
+  }
+}
+
+export function bboxStyle(bbox: [number, number, number, number]): { left: string; top: string; width: string; height: string } {
+  const clamp = (value: number) => Math.max(0, Math.min(1, value))
+  const [x, y, width, height] = bbox.map(clamp)
+  return {
+    left: `${Math.round(x * 10000) / 100}%`,
+    top: `${Math.round(y * 10000) / 100}%`,
+    width: `${Math.round(width * 10000) / 100}%`,
+    height: `${Math.round(height * 10000) / 100}%`,
+  }
+}

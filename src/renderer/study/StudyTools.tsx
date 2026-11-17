@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { StudyArtifact, StudyQuizAnswer, StudySessionDetail, StudyToolKind } from '../../shared/study'
+import type { PageView } from '../../shared/contract'
+import type { StudyArtifact, StudyQuizAnswer, StudyQuizResult, StudySessionDetail, StudySlideCitation, StudyToolKind } from '../../shared/study'
+import { pageForPageNumber, toolCitation } from './evidence'
 
 type ToolPayload = { query?: string; answer?: string; answers?: StudyQuizAnswer[] }
 
 export function StudyTools({
   detail,
   unitOrdinal,
+  pages,
+  onOpenPage,
   focus,
   busy,
   onFocus,
@@ -13,6 +17,8 @@ export function StudyTools({
 }: {
   detail: StudySessionDetail
   unitOrdinal: number | null
+  pages: PageView[]
+  onOpenPage: (citation: StudySlideCitation, page: PageView | null) => void
   focus: StudyToolKind | null
   busy: string | null
   onFocus: (tool: StudyToolKind | null) => void
@@ -127,10 +133,10 @@ export function StudyTools({
       {localError ? <div className="banner bad">{localError}</div> : null}
 
       <div className="study-tool-artifacts">
-        {summary ? <SummaryArtifact artifact={summary} /> : null}
+        {summary ? <SummaryArtifact artifact={summary} pages={pages} onOpenPage={onOpenPage} /> : null}
         {outline ? <OutlineArtifact artifact={outline} /> : null}
         {search ? <SearchArtifact artifact={search} /> : null}
-        {quiz ? <QuizArtifact artifact={quiz} answers={answers} setAnswers={setAnswers} onSubmit={submitQuiz} blocked={blocked} /> : null}
+        {quiz ? <QuizArtifact artifact={quiz} answers={answers} setAnswers={setAnswers} onSubmit={submitQuiz} blocked={blocked} pages={pages} onOpenPage={onOpenPage} /> : null}
         {teachbackArtifact ? <TeachbackArtifact artifact={teachbackArtifact} /> : null}
         {!summary && !outline && !search && !quiz && !teachbackArtifact ? (
           <p className="empty">还没有生成物。点“考考我”或“总结这一讲”，结果会落在课程资料里。</p>
@@ -149,18 +155,39 @@ function ArtifactHead({ artifact, chip }: { artifact: StudyArtifact; chip: strin
   )
 }
 
-function SummaryArtifact({ artifact }: { artifact: StudyArtifact }) {
+function SummaryArtifact({
+  artifact,
+  pages,
+  onOpenPage,
+}: {
+  artifact: StudyArtifact
+  pages: PageView[]
+  onOpenPage: (citation: StudySlideCitation, page: PageView | null) => void
+}) {
   return (
     <section className="study-tool-card">
       <ArtifactHead artifact={artifact} chip="总结" />
       <p>{artifact.body.text}</p>
       {artifact.body.citations?.length ? (
         <div className="study-tool-citations">
-          {artifact.body.citations.slice(0, 4).map((citation) => (
-            <span key={`${citation.unitOrdinal}-${citation.segmentIndex}`} className="chip">
-              第 {citation.unitOrdinal + 1} 讲 · {citation.source.slice(0, 28)}
-            </span>
-          ))}
+          {artifact.body.citations.slice(0, 4).map((citation) => {
+            const pageNumber = citation.pageNumber ?? null
+            const page = pageForPageNumber(pages, pageNumber)
+            return pageNumber ? (
+              <button
+                key={`${citation.unitOrdinal}-${citation.segmentIndex}`}
+                className="study-tool-cite"
+                onClick={() => onOpenPage(toolCitation(pageNumber, citation.source, page), page)}
+              >
+                <b>p.{pageNumber}</b>
+                <span>第 {citation.unitOrdinal + 1} 讲 · {citation.source.slice(0, 28)}</span>
+              </button>
+            ) : (
+              <span key={`${citation.unitOrdinal}-${citation.segmentIndex}`} className="chip">
+                第 {citation.unitOrdinal + 1} 讲 · {citation.source.slice(0, 28)}
+              </span>
+            )
+          })}
         </div>
       ) : null}
     </section>
@@ -206,31 +233,65 @@ function QuizArtifact({
   setAnswers,
   onSubmit,
   blocked,
+  pages,
+  onOpenPage,
 }: {
   artifact: StudyArtifact
   answers: Record<string, string>
   setAnswers: (next: Record<string, string>) => void
   onSubmit: () => void
   blocked: boolean
+  pages: PageView[]
+  onOpenPage: (citation: StudySlideCitation, page: PageView | null) => void
 }) {
   const questions = artifact.body.questions ?? []
+  const resultFor = (index: number): StudyQuizResult | null =>
+    artifact.body.results?.find((result) => result.index === index + 1) ?? null
+
   return (
     <section className="study-tool-card">
       <ArtifactHead artifact={artifact} chip={artifact.body.graded ? '已判' : '先答后判'} />
-      {questions.map((question, index) => (
-        <div key={question.id} className="study-tool-quiz-question">
-          <b>{index + 1}. {question.prompt}</b>
-          {question.hint ? <small>提示：{question.hint}</small> : null}
-          <blockquote>{question.source}</blockquote>
-          <textarea
-            rows={2}
-            value={answers[question.id] ?? ''}
-            maxLength={1200}
-            placeholder="先写你的答案。老师看完再判，不提前给答案。"
-            onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
-          />
-        </div>
-      ))}
+      {questions.map((question, index) => {
+        const pageNumber = question.pageNumber ?? null
+        const page = pageForPageNumber(pages, pageNumber)
+        const result = resultFor(index)
+        return (
+          <div key={question.id} className="study-tool-quiz-question">
+            <b>{index + 1}. {question.prompt}</b>
+            {question.hint ? <small>提示：{question.hint}</small> : null}
+            <blockquote className="study-tool-source">
+              {pageNumber ? (
+                <button className="study-tool-cite" onClick={() => onOpenPage(toolCitation(pageNumber, question.source, page), page)}>
+                  <b>p.{pageNumber}</b>
+                  <span>题面出处</span>
+                </button>
+              ) : null}
+              <span>{question.source}</span>
+            </blockquote>
+            {result ? (
+              <div className={`study-tool-result ${result.correct ? 'ok' : 'bad'}`}>
+                <b>{result.correct ? '答对' : '答错'} · 第 {index + 1} 题</b>
+                <p>{result.explain}</p>
+                {pageNumber ? (
+                  <button className="study-tool-cite" onClick={() => onOpenPage(toolCitation(pageNumber, question.source, page), page)}>
+                    <b>p.{pageNumber}</b>
+                    <span>回原页</span>
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+            {artifact.body.graded ? null : (
+              <textarea
+                rows={2}
+                value={answers[question.id] ?? ''}
+                maxLength={1200}
+                placeholder="先写你的答案。老师看完再判，不提前给答案。"
+                onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
+              />
+            )}
+          </div>
+        )
+      })}
       {artifact.body.graded ? (
         <div className="study-tool-feedback">
           <b>老师反馈</b>

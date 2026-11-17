@@ -83,6 +83,8 @@ export type StudyCitation = {
   unitTitle: string
   segmentIndex: number
   source: string
+  /** 能逐字对回课件页时写页号；对不上就留空，界面不显示假页码。 */
+  pageNumber?: number | null
 }
 
 export type StudySearchMatch = {
@@ -104,11 +106,19 @@ export type StudyQuizQuestion = {
   prompt: string
   hint: string
   source: string
+  /** 题面原句能对回课件页时的页号；对不上就不给页码。 */
+  pageNumber?: number | null
 }
 
 export type StudyQuizAnswer = {
   questionId: string
   answer: string
+}
+
+export type StudyQuizResult = {
+  index: number
+  correct: boolean
+  explain: string
 }
 
 /** 课堂题测留下的错题；和旧 teaching.misses 分开，避免把 lecture_id 硬塞进 study 会话。 */
@@ -156,6 +166,8 @@ export type StudyArtifact = {
     gaps?: string[]
     covered?: string[]
     answer?: string
+    /** 判题后每题的结果；index 从 1 开始，和题面顺序一致。 */
+    results?: StudyQuizResult[]
   }
   createdAt: string
   updatedAt: string
