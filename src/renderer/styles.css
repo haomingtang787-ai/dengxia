@@ -1120,6 +1120,31 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .ws-lecture-index { color: #1f7f6a; font-size: 10px; letter-spacing: 0.1em; }
 .ws-lecture-head h3 { margin: 2px 0 0; font-size: 17px; line-height: 1.35; font-family: "Iowan Old Style", Palatino, "Songti SC", "Noto Serif SC", serif; font-weight: 600; }
 .ws-lecture-head small { color: #9daba5; font-size: 10.5px; white-space: nowrap; padding-top: 4px; }
+.ws-lecture-cite {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 7px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: #5b6c64;
+}
+.ws-lecture-cite:is(button) { cursor: pointer; }
+.ws-lecture-cite:is(button):hover .ws-page-chip { background: #e6f4ed; border-color: #bfe0d2; }
+.ws-page-chip {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid #d9e8e1;
+  border-radius: 999px;
+  background: #f3faf7;
+  color: #1f7f6a;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.ws-lecture-quote { color: #5b6c64; font-size: 11px; line-height: 1.55; }
 .ws-keypoints { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 10px; }
 .ws-keypoints span {
   border: 1px solid #e0ece7;
@@ -1211,6 +1236,21 @@ button:disabled { cursor: not-allowed; opacity: 0.55; }
 .ws-cite-label button:hover { color: #1f7f6a; text-decoration: underline; }
 .ws-cite-text blockquote { margin: 0; color: #33413b; font-size: 12px; line-height: 1.6; }
 .ws-cite-text .quiet { margin: 0; font-size: 10px; line-height: 1.45; }
+.ws-cite-caption { margin: 0; color: #7a8782; font-size: 10px; line-height: 1.45; }
+.ws-cite-label .ws-cite-copy { color: #1f7f6a; }
+.ws-bubble .ws-cite-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: #f3f7f5;
+  color: #5b6c64;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+.ws-bubble .ws-cite-note span { color: #8a9892; font-size: 10.5px; }
 .ws-cite-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .ws-cite-chips button {
   border: 1px solid #d9e8e1;

@@ -25,6 +25,7 @@ import { MathText } from '../components/MathText'
 import { DEFAULT_AI } from '../../shared/ai'
 import { TeacherProfile } from './TeacherProfile'
 import { StudyTools } from './StudyTools'
+import { citationPage, evidenceLayout } from './evidence'
 import {
   AVOID_OPTIONS,
   DEFAULT_HABITS,
@@ -83,8 +84,8 @@ function timeLabel(value: string): string {
 }
 
 function pageNumberFromSource(source: string): number | null {
-  const match = source.match(/第\s*(\d+)\s*页/)
-  return match ? Number(match[1]) : null
+  const match = source.match(/第\s*(\d+)\s*页|(?:^|[\s（(])p\.?\s*(\d+)/i)
+  return match ? Number(match[1] ?? match[2]) : null
 }
 
 function stripCoursePrefix(value: string, courseName: string): string {
@@ -100,12 +101,6 @@ function bboxStyle(bbox: [number, number, number, number]): { left: string; top:
     width: `${Math.max(0, Math.min(1, bbox[2])) * 100}%`,
     height: `${Math.max(0, Math.min(1, bbox[3])) * 100}%`,
   }
-}
-
-function pageForCitation(citation: StudySlideCitation, pages: PageView[]): PageView | null {
-  return pages.find((page) => page.pageId === citation.pageId)
-    ?? pages.find((page) => page.ordinal === citation.pageNumber - 1)
-    ?? null
 }
 
 export function StudyView({
@@ -1092,7 +1087,6 @@ export function StudyView({
                 key={message.id}
                 message={message}
                 teacherName={teacherName}
-                latest={false}
                 pages={pages}
                 onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
               />
@@ -1110,21 +1104,20 @@ export function StudyView({
                     unit={unit}
                     checks={detail.checks}
                     active={activeUnit?.id === unit.id}
+                    pages={pages}
+                    onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
                     onSave={saveCheck}
                   />
-                  {(() => {
-                    const lastAssistantIndex = unitMessages.map((message) => message.role).lastIndexOf('assistant')
-                    return unitMessages.map((message, index) => (
-                      <ChatMessage
-                        key={message.id}
-                        message={message}
-                        teacherName={teacherName}
-                        latest={index === lastAssistantIndex}
-                        pages={pages}
-                        onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
-                      />
-                    ))
-                  })()}
+                  {unitMessages.map((message) => (
+                    <ChatMessage
+                      key={message.id}
+                      message={message}
+                      teacherName={teacherName}
+                      markUncited
+                      pages={pages}
+                      onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
+                    />
+                  ))}
                   {busy === 'send' && activeUnit?.id === unit.id ? (
                     <div className="ws-message assistant pending">
                       <span className="ws-avatar">师</span>
@@ -1139,7 +1132,6 @@ export function StudyView({
                 key={message.id}
                 message={message}
                 teacherName={teacherName}
-                latest={false}
                 pages={pages}
                 onOpenPage={(citation, page) => setSlidePeek({ citation, page })}
               />
@@ -1269,13 +1261,13 @@ function orphanMessages(detail: StudySessionDetail): StudyMessage[] {
 function ChatMessage({
   message,
   teacherName,
-  latest,
+  markUncited = false,
   pages,
   onOpenPage,
 }: {
   message: StudyMessage
   teacherName: string
-  latest: boolean
+  markUncited?: boolean
   pages: PageView[]
   onOpenPage: (citation: StudySlideCitation, page: PageView | null) => void
 }) {
@@ -1295,8 +1287,7 @@ function ChatMessage({
     )
   }
   const citations = message.citations
-  const cards = latest ? citations.slice(0, 2) : []
-  const chips = latest ? citations.slice(2) : citations
+  const { cards, more: chips } = evidenceLayout(citations)
   return (
     <div className="ws-message assistant">
       <span className="ws-avatar">师</span>
@@ -1307,20 +1298,23 @@ function ChatMessage({
         </div>
         <div className="ws-bubble">
           <p><MathText text={message.content} /></p>
+          {markUncited && citations.length === 0 ? (
+            <p className="ws-cite-note">讲解 · 我的归纳 <span>没有课件页码</span></p>
+          ) : null}
           {cards.length ? (
             <div className="ws-cites">
               {cards.map((citation) => (
                 <CitationCard
                   key={`${message.id}-${citation.pageNumber}-${citation.quote.slice(0, 8)}`}
                   citation={citation}
-                  page={pageForCitation(citation, pages)}
+                  page={citationPage(citation, pages)}
                   onOpen={(page) => onOpenPage(citation, page)}
                 />
               ))}
               {chips.length ? (
                 <div className="ws-cite-chips">
                   {chips.map((citation) => (
-                    <button key={`${message.id}-chip-${citation.pageNumber}`} onClick={() => onOpenPage(citation, pageForCitation(citation, pages))}>
+                    <button key={`${message.id}-chip-${citation.pageNumber}`} onClick={() => onOpenPage(citation, citationPage(citation, pages))}>
                       还有 p.{citation.pageNumber}
                     </button>
                   ))}
@@ -1330,7 +1324,7 @@ function ChatMessage({
           ) : chips.length ? (
             <div className="ws-cite-chips">
               {chips.map((citation) => (
-                <button key={`${message.id}-chip-${citation.pageNumber}`} onClick={() => onOpenPage(citation, pageForCitation(citation, pages))}>
+                <button key={`${message.id}-chip-${citation.pageNumber}`} onClick={() => onOpenPage(citation, citationPage(citation, pages))}>
                   p.{citation.pageNumber}
                 </button>
               ))}
@@ -1351,10 +1345,17 @@ function CitationCard({
   page: PageView | null
   onOpen: (page: PageView | null) => void
 }) {
+  const [copied, setCopied] = useState(false)
   const image = page?.previewResourceId
+
+  function copyCitation() {
+    const text = `第 ${citation.pageNumber} 页：${citation.quote}`
+    void navigator.clipboard?.writeText(text).then(() => setCopied(true)).catch(() => {})
+  }
+
   return (
     <article className="ws-cite">
-      <button className="ws-cite-thumb" onClick={() => onOpen(page)} title={`打开第 ${citation.pageNumber} 页`}>
+      <button className="ws-cite-thumb" onClick={() => onOpen(page)} title={`定位到第 ${citation.pageNumber} 页`}>
         {image ? (
           <>
             <img src={`app-resource://${image}`} alt={`第 ${citation.pageNumber} 页`} />
@@ -1371,13 +1372,14 @@ function CitationCard({
         <div className="ws-cite-label">
           <span>对照讲义</span>
           <b>p.{citation.pageNumber}</b>
+          <button className="ws-cite-copy" onClick={copyCitation}>{copied ? '已复制' : '复制引用'}</button>
           <button className="ws-cite-open" onClick={() => onOpen(page)}>打开这一页 ↗</button>
         </div>
         <blockquote>{citation.quote}</blockquote>
         <p className="ws-cite-caption">
           {image
-            ? (citation.bbox ? '整页图，黄框标出原句位置' : '整页图；这一句无法定位，直接保留原句')
-            : '原句卡：这一页没有页面图'}
+            ? (citation.bbox ? '整页图，黄框标出原句位置' : '定位到页 · 原句未能逐字对上，不画假框')
+            : '定位到页 · 这一页没有页面图，按页码定位'}
         </p>
       </div>
     </article>
@@ -1402,7 +1404,7 @@ function PagePeek({
             <p className="quiet">
               {citation.bbox
                 ? '整页原图，不裁剪；黄色框是老师刚才引用的位置。'
-                : '整页原图，不裁剪；这一句没有可定位的框，下面保留原句。'}
+                : '定位到页：整页原图，不裁剪；这一句未能逐字对上，所以不画框。'}
             </p>
           </div>
           <button className="icon-btn" title="关闭" onClick={onClose}>×</button>
@@ -1427,11 +1429,15 @@ function LectureBlock({
   unit,
   checks,
   active,
+  pages,
+  onOpenPage,
   onSave,
 }: {
   unit: StudyUnit
   checks: StudyCheck[]
   active: boolean
+  pages: PageView[]
+  onOpenPage: (citation: StudySlideCitation, page: PageView | null) => void
   onSave: (unitOrdinal: number, segmentIndex: number, answer: string) => Promise<boolean>
 }) {
   const [drafts, setDrafts] = useState<Record<number, string>>({})
@@ -1459,7 +1465,18 @@ function LectureBlock({
       <div className="ws-segments">
         {unit.segments.map((segment, index) => {
           const saved = savedFor(index)
-          const page = pageNumberFromSource(segment.source) ?? pageNumberFromSource(unit.source)
+          const pageNumber = pageNumberFromSource(segment.source) ?? pageNumberFromSource(unit.source)
+          const page = pageNumber ? pages.find((item) => item.ordinal === pageNumber - 1) ?? null : null
+          const citation: StudySlideCitation | null = pageNumber
+            ? {
+                pageNumber,
+                pageId: page?.pageId ?? null,
+                quote: segment.source,
+                blockId: null,
+                // 讲稿段只有文字出处，没有 block locator；宁可“定位到页”，也不画假框。
+                bbox: null,
+              }
+            : null
           return (
             <section key={`${unit.id}-${index}`} className="ws-segment ws-message assistant ws-lecture-msg">
               <span className="ws-avatar">师</span>
@@ -1471,10 +1488,16 @@ function LectureBlock({
                 <div className="ws-bubble">
                   <p><MathText text={segment.explain} /></p>
                   {segment.source ? (
-                    <div className="ws-lecture-cite">
-                      {page ? <span className="ws-page-chip">p.{page}</span> : null}
-                      <span className="ws-lecture-quote">{segment.source}</span>
-                    </div>
+                    citation ? (
+                      <button className="ws-lecture-cite" onClick={() => onOpenPage(citation, page)} title={`定位到第 ${citation.pageNumber} 页`}>
+                        <span className="ws-page-chip">p.{citation.pageNumber}</span>
+                        <span className="ws-lecture-quote">{segment.source}</span>
+                      </button>
+                    ) : (
+                      <div className="ws-lecture-cite">
+                        <span className="ws-lecture-quote">{segment.source}</span>
+                      </div>
+                    )
                   ) : null}
                   {segment.check ? (
                     <details className="ws-check">

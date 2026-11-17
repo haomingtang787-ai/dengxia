@@ -371,6 +371,100 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     )))
     return
   }
+  if (action === 'evidence-note') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    const note = await win.webContents.executeJavaScript(
+      `(() => {
+        const node = document.querySelector('.ws-cite-note');
+        node?.scrollIntoView({ block: 'center' });
+        return node ? node.innerText.replace(/\\n/g, ' / ') : '';
+      })()`,
+    )
+    console.log('[smoke] evidence-note', JSON.stringify({ note }))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    return
+  }
+  if (action === 'evidence-all') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    const stats = await win.webContents.executeJavaScript(
+      `(() => {
+        const all = [...document.querySelectorAll('.ws-message.assistant')].filter((item) => !item.classList.contains('pending'));
+        const assistants = all.filter((item) => !item.classList.contains('ws-lecture-msg'));
+        const lectures = all.filter((item) => item.classList.contains('ws-lecture-msg'));
+        const cited = assistants.filter((item) => item.querySelector('.ws-cite'));
+        const notes = assistants.filter((item) => item.querySelector('.ws-cite-note'));
+        const first = cited[0];
+        if (first) first.scrollIntoView({ block: 'center' });
+        return {
+          assistants: assistants.length,
+          cited: cited.length,
+          cards: assistants.reduce((sum, item) => sum + item.querySelectorAll('.ws-cite').length, 0),
+          chips: assistants.reduce((sum, item) => sum + item.querySelectorAll('.ws-cite-chips button').length, 0),
+          notes: notes.length,
+          lectures: lectures.length,
+          lectureCited: lectures.filter((item) => item.querySelector('.ws-lecture-cite')).length,
+          firstCitedText: first ? first.innerText.slice(0, 80).replace(/\\n/g, ' / ') : '',
+        };
+      })()`,
+    )
+    console.log('[smoke] evidence-all', JSON.stringify(stats))
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    return
+  }
+  if (action === 'evidence-lecture') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => { const button = document.querySelector('.ws-lecture-cite'); button?.scrollIntoView({ block: 'center' }); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const peek = await win.webContents.executeJavaScript(
+      `(() => { const modal = document.querySelector('.ws-peek'); return {
+        open: Boolean(modal),
+        title: modal?.querySelector('h2')?.textContent ?? '',
+        image: Boolean(modal?.querySelector('.ws-peek-image img')),
+        box: Boolean(modal?.querySelector('.ws-cite-box')),
+        quote: (modal?.querySelector('blockquote')?.innerText ?? '').slice(0, 80),
+      } })()`,
+    )
+    console.log('[smoke] evidence-lecture', JSON.stringify({ clicked, ...peek }))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
+  if (action === 'evidence-open') {
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    await win.webContents.executeJavaScript(
+      `(() => { const doc = document.querySelector('.ws-doc'); doc?.click(); return Boolean(doc) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 1800))
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => { const button = document.querySelector('.ws-cite-open'); button?.click(); return Boolean(button) })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const peek = await win.webContents.executeJavaScript(
+      `(() => { const modal = document.querySelector('.ws-peek'); return {
+        open: Boolean(modal),
+        title: modal?.querySelector('h2')?.textContent ?? '',
+        image: Boolean(modal?.querySelector('.ws-peek-image img')),
+        box: Boolean(modal?.querySelector('.ws-cite-box')),
+        quote: (modal?.querySelector('blockquote')?.innerText ?? '').slice(0, 80),
+      } })()`,
+    )
+    console.log('[smoke] evidence-open', JSON.stringify({ clicked, ...peek }))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    return
+  }
   if (action === 'review-open') {
     await new Promise((resolve) => setTimeout(resolve, 1200))
     await win.webContents.executeJavaScript(
