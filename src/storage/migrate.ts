@@ -406,7 +406,7 @@ function backfillSearch(db: AppDatabase): void {
 }
 
 /** 恢复旧备份时用它判断备份 schema 是否比当前应用新。 */
-export const CURRENT_SCHEMA_VERSION = 11
+export const CURRENT_SCHEMA_VERSION = 13
 
 const COST_SCHEMA = `
 CREATE TABLE material_digests (
@@ -486,6 +486,22 @@ CREATE TABLE teacher_notes (
 );
 
 ALTER TABLE study_sessions ADD COLUMN teacher_snapshot_json TEXT NOT NULL DEFAULT '';
+`
+
+const STUDY_ARTIFACT_SCHEMA = `
+CREATE TABLE study_artifacts (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES study_sessions(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('summary','outline','search','quiz','teachback')),
+  scope TEXT NOT NULL DEFAULT 'course',
+  title TEXT NOT NULL,
+  body_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (session_id, kind, scope)
+);
+
+CREATE INDEX idx_study_artifacts_session ON study_artifacts(session_id, updated_at DESC);
 `
 
 function hasVersion(db: AppDatabase, version: number): boolean {  return Boolean(db.get<{ version: number }>('SELECT version FROM schema_migrations WHERE version = ?', version))
@@ -579,6 +595,35 @@ export function migrate(db: AppDatabase): void {
         at,
       )
       db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 11, at)
+    })
+  }
+  if (!hasVersion(db, 12)) {
+    db.transaction(() => {
+      // 0.7.1 老师工具：总结/大纲/查找/题测/复述都落在课程资料里，不另开页面。
+      db.exec(STUDY_ARTIFACT_SCHEMA)
+      db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 12, nowIso())
+    })
+  }
+  if (!hasVersion(db, 13)) {
+    db.transaction(() => {
+      // 0.7.2 用量可对账：区分真实回报与估算，并把缓存命中/未命中、推理 token、模型名一起留下。
+      db.exec('ALTER TABLE ai_usage ADD COLUMN cache_miss_tokens INTEGER NOT NULL DEFAULT 0')
+      db.exec('ALTER TABLE ai_usage ADD COLUMN reasoning_tokens INTEGER NOT NULL DEFAULT 0')
+      db.exec('ALTER TABLE ai_usage ADD COLUMN provider_reported INTEGER NOT NULL DEFAULT 1')
+      db.exec('ALTER TABLE ai_usage ADD COLUMN model TEXT NOT NULL DEFAULT \'\'')
+      // 老库没有这个标记：全 0 行本来就只可能来自“没回 usage”，其余行视为真实回报。
+      db.exec(
+        `UPDATE ai_usage SET provider_reported = 0
+         WHERE prompt_tokens = 0 AND cached_tokens = 0 AND completion_tokens = 0`,
+      )
+      db.exec(
+        `UPDATE ai_usage SET provider_reported = 1
+         WHERE prompt_tokens > 0 OR cached_tokens > 0 OR completion_tokens > 0`,
+      )
+      // 老行没有单独记未命中：输入减去命中就是未命中，正好补上。
+      db.exec('UPDATE ai_usage SET cache_miss_tokens = MAX(0, prompt_tokens - cached_tokens)')
+      db.exec('CREATE INDEX idx_ai_usage_reported ON ai_usage(provider_reported)')
+      db.run('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)', 13, nowIso())
     })
   }
 }

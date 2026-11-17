@@ -1,4 +1,4 @@
-import fs from 'node:fs'
+﻿import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -95,7 +95,7 @@ describe('文稿整理、复习统计与备份', () => {
     const snapshot = AppDatabase.open(path.join(target, 'library.sqlite'))
     try {
       expect(snapshot.get<{ total: number }>('SELECT COUNT(*) AS total FROM documents')?.total).toBe(1)
-      expect(snapshot.get<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')?.version).toBe(11)
+      expect(snapshot.get<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')?.version).toBe(13)
     } finally {
       snapshot.close()
     }
@@ -108,3 +108,4 @@ describe('文稿整理、复习统计与备份', () => {
     await app.cleanup()
   })
 })
+

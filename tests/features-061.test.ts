@@ -195,8 +195,8 @@ describe('0.6.1 信任层', () => {
     const settings = new SettingsStore(path.join(root, 'settings.json'))
     settings.save({ libreOfficePath: null, ai: null, pinnedDocumentIds: [], budget: { monthlyTokens: 1000, hardStop: false } })
     db.run(
-      `INSERT INTO ai_usage(session_id, document_version_id, kind, prompt_tokens, cached_tokens, completion_tokens, created_at)
-       VALUES (NULL, NULL, 'chat', 0, 0, 0, ?)`,
+      `INSERT INTO ai_usage(session_id, document_version_id, kind, prompt_tokens, cached_tokens, completion_tokens, provider_reported, created_at)
+       VALUES (NULL, NULL, 'chat', 0, 0, 0, 0, ?)`,
       new Date().toISOString(),
     )
     const budget = new BudgetService(db, settings)
@@ -207,8 +207,8 @@ describe('0.6.1 信任层', () => {
       expect(status.used).toBe(0)
 
       db.run(
-        `INSERT INTO ai_usage(session_id, document_version_id, kind, prompt_tokens, cached_tokens, completion_tokens, created_at)
-         VALUES (NULL, NULL, 'chat', 20, 0, 10, ?)`,
+        `INSERT INTO ai_usage(session_id, document_version_id, kind, prompt_tokens, cached_tokens, completion_tokens, provider_reported, created_at)
+         VALUES (NULL, NULL, 'chat', 20, 0, 10, 1, ?)`,
         new Date().toISOString(),
       )
       const after = budget.status()

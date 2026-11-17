@@ -149,8 +149,18 @@ const desk = {
     list: () => invoke<import('../shared/study').StudySessionList>(IpcChannel.studyList, {}),
     get: (body: { sessionId: string }) =>
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyGet, body),
-    send: (body: { sessionId: string; content: string; unitOrdinal?: number | null }) =>
+    send: (body: { sessionId: string; content: string; unitOrdinal?: number | null; mode?: import('../shared/study').StudyMode; skill?: import('../shared/study').StudySkill }) =>
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studySend, body),
+    tool: (body: {
+      sessionId: string
+      tool: import('../shared/study').StudyToolKind
+      unitOrdinal?: number | null
+      query?: string
+      answer?: string
+      answers?: import('../shared/study').StudyQuizAnswer[]
+    }) => invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyTool, body),
+    usageAudit: (body: { sessionId: string }) =>
+      invoke<import('../shared/study').StudyUsageAudit>(IpcChannel.studyUsageAudit, body),
     finish: (body: { sessionId: string }) =>
       invoke<import('../shared/study').StudySessionDetail>(IpcChannel.studyFinish, body),
     check: (body: { sessionId: string; unitOrdinal: number; segmentIndex: number; answer: string }) =>

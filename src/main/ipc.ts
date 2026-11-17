@@ -109,6 +109,8 @@ export function registerIpc(
   bind(IpcChannel.studyList, () => study.list())
   bind(IpcChannel.studyGet, (_event, body) => study.get(body))
   bind(IpcChannel.studySend, (_event, body) => study.send(body))
+  bind(IpcChannel.studyTool, (_event, body) => study.tool(body))
+  bind(IpcChannel.studyUsageAudit, (_event, body) => study.usageAudit(body))
   bind(IpcChannel.studyFinish, (_event, body) => study.finish(body))
   bind(IpcChannel.studyCheck, (_event, body) => study.check(body))
   bind(IpcChannel.studyClearChat, (_event, body) => study.clearChat(body))

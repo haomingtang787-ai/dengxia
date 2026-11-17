@@ -1,32 +1,63 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { AiClient, AiError } from '../ai/client'
+import { AiClient, AiError, type AiUsage } from '../ai/client'
 import { isUuid, nowIso } from '../domain/ids'
 import { ArgumentError, isPlainObject } from '../domain/validation'
 import type { ImageService } from '../images/service'
 import type { SettingsStore } from '../providers/settings'
 import { fail, ok, type Result } from '../shared/contract'
 import type {
+  StudyArtifact,
   StudyCheck,
   StudyMessage,
+  StudyMode,
+  StudyQuizAnswer,
+  StudyQuizQuestion,
   StudySessionDetail,
   StudySessionList,
   StudyProgress,
+  StudySkill,
   StudySummary,
+  StudyToolKind,
   StudyUnit,
   StudyUsage,
+  StudyUsageAudit,
+  StudyUsageKind,
 } from '../shared/study'
 import type { AppDatabase } from '../storage/database'
-import { StudyStore, messageFromRow, type StudyMessageRow, type StudySessionRow, type StudyUnitRow } from '../storage/studyStore'
+import { StudyStore, messageFromRow, type StudyArtifactRow, type StudyMessageRow, type StudySessionRow, type StudyUnitRow } from '../storage/studyStore'
 import type { Habits } from '../teaching/habits'
 import type { TeacherService } from '../teaching/teacherService'
 import { DEFAULT_HABITS, sanitizeHabits } from '../teaching/habits'
 import { DIRECT_PLAN_CHARS, MAX_MATERIAL_CHARS, digestMaterial, renderDigests } from './digest'
-import { parseStudyPlan, parseStudySummary, parseTeacherNote } from './parse'
-import { buildStudyChatPrompt, buildStudyPlanPrompt, buildStudySummaryPrompt, buildTeacherNotePrompt, mergeOpening } from './prompt'
+import { parseQuizGrade, parseStudyPlan, parseStudyQuiz, parseStudySummary, parseTeacherNote, parseTeachback } from './parse'
+import {
+  buildStudyChatPrompt,
+  buildStudyPlanPrompt,
+  buildStudyQuizGradePrompt,
+  buildStudyQuizPrompt,
+  buildStudySummaryPrompt,
+  buildStudySummaryToolPrompt,
+  buildStudyTeachbackPrompt,
+  buildTeacherNotePrompt,
+  mergeOpening,
+} from './prompt'
+import {
+  citationsForUnits,
+  isStudySkill,
+  outlineStudyUnits,
+  routeStudySkill,
+  routeStudyToolIntent,
+  searchQueryFrom,
+  searchStudyUnits,
+  studyMaterial,
+  teachbackAnswerFrom,
+} from './tools'
 import { groundUnits } from './ground'
 
 const MAX_MESSAGE_CHARS = 4_000
 const MAX_ANSWER_CHARS = 2_000
+const MAX_TOOL_ANSWER_CHARS = 1_200
+const MAX_SEARCH_QUERY_CHARS = 80
 
 export type StudyServiceOptions = {
   db: AppDatabase
@@ -69,11 +100,10 @@ type ReadingRow = {
   text: string
 }
 
+type UsageScope = { sessionId: string | null; documentVersionId: string | null }
+
 export class StudyService {
   private readonly store: StudyStore
-  /** 用量上报时的归属：开课前只有文稿，建好课后补记到这门课名下。 */
-  private usageSessionId: string | null = null
-  private usageVersionId: string | null = null
 
   constructor(private readonly options: StudyServiceOptions) {
     this.store = new StudyStore(options.db)
@@ -105,12 +135,13 @@ export class StudyService {
       const existing = this.store.findByRequest(input.requestId)
       if (existing) return ok(requestId, this.detail(existing.id))
       this.config()
-      this.usageSessionId = null
-      this.usageVersionId = input.documentVersionId
+      // 先把 sessionId 定下来，读图/分段理解/拆课的用量直接挂到这门课，避免并发开课互相认领。
+      const sessionId = randomUUID()
+      const usageScope: UsageScope = { sessionId, documentVersionId: input.documentVersionId }
       const meta = this.documentMeta(input.documentVersionId)
       const material = await this.collectMaterial(input.documentVersionId)
       const habits = this.options.habits() ?? DEFAULT_HABITS
-      const client = this.client()
+      const client = this.client(usageScope)
       const warnings = [...material.warnings]
       // 长课件不再截断成前 20 万字：先按页分段逐段读懂，再拿结构化理解去拆课。
       let digests = ''
@@ -177,7 +208,6 @@ export class StudyService {
           subject: input.subject || '',
         })
       }
-      const sessionId = randomUUID()
       const timestamp = nowIso()
       const grounded = groundUnits(plan.units.map((unit, index) => ({
         id: randomUUID(),
@@ -234,9 +264,8 @@ export class StudyService {
           created_at: timestamp,
         },
       })
-      // 开课阶段的读图/分段理解/拆课用量之前没有归属，现在记到这门课名下。
+      // 读图等开课前发生的、没有 session 的用量归到这门课；本次拆课用量已经直接带了 sessionId。
       this.store.claimUsage(sessionId, input.documentVersionId)
-      this.usageSessionId = sessionId
       return ok(requestId, this.detail(sessionId))
     } catch (error) {
       return this.failure(requestId, error)
@@ -255,9 +284,41 @@ export class StudyService {
       const unit = input.unitOrdinal == null
         ? units[0] ?? null
         : units.find((item) => item.ordinal === input.unitOrdinal) ?? null
+      // 说「找原文 / 总结这一讲 / 考考我」时先执行一次性工具，不再让模型陪聊一遍。
+      const intent = routeStudyToolIntent(input.content)
+      if (intent) {
+        const toolResult = await this.tool({
+          sessionId: session.id,
+          tool: intent,
+          unitOrdinal: intent === 'search' ? null : unit?.ordinal ?? null,
+          query: intent === 'search' ? searchQueryFrom(input.content) : '',
+          answer: intent === 'teachback' ? teachbackAnswerFrom(input.content) : '',
+        })
+        if (!toolResult.ok) return toolResult
+        const artifact = toolResult.data.artifacts.find((item) => item.kind === intent)
+        const timestamp = nowIso()
+        const reply = this.toolChatReply(intent, artifact, unit)
+        this.options.db.transaction(() => {
+          this.store.appendMessage({
+            id: randomUUID(),
+            session_id: session.id,
+            role: 'user',
+            unit_ordinal: unit?.ordinal ?? input.unitOrdinal ?? null,
+            content: input.content,
+            created_at: timestamp,
+          })
+          this.store.appendMessage({
+            id: randomUUID(),
+            session_id: session.id,
+            role: 'assistant',
+            unit_ordinal: unit?.ordinal ?? input.unitOrdinal ?? null,
+            content: reply,
+            created_at: timestamp,
+          })
+        })
+        return ok(requestId, this.detail(session.id))
+      }
       const messages = this.messages(session.id)
-      this.usageSessionId = session.id
-      this.usageVersionId = session.document_version_id
       const prompt = buildStudyChatPrompt({
         overview: session.overview,
         outline: this.outline(session),
@@ -267,8 +328,13 @@ export class StudyService {
         question: input.content,
         habits,
         teacher: this.options.teacher?.context(session.subject, unit?.title ?? ''),
+        skill: routeStudySkill(input.content, input.skill),
+        mode: input.mode,
       })
-      const answer = (await this.client().complete(prompt.system, prompt.user, 3000, 'disabled', 'chat')).trim()
+      const answer = (await this.client({
+        sessionId: session.id,
+        documentVersionId: session.document_version_id,
+      }).complete(prompt.system, prompt.user, 3000, 'disabled', 'chat')).trim()
       if (!answer) throw new AiError('AI_FAILED', '模型没有返回讲解。')
       const timestamp = nowIso()
       const userMessage: StudyMessageRow = {
@@ -297,6 +363,132 @@ export class StudyService {
     }
   }
 
+  async tool(body: unknown): Promise<Result<StudySessionDetail>> {
+    const requestId = randomUUID()
+    try {
+      const input = this.toolBody(body)
+      const session = this.requireSession(input.sessionId)
+      const units = this.units(session.id)
+      const unit = input.unitOrdinal == null ? null : units.find((item) => item.ordinal === input.unitOrdinal) ?? null
+      if (input.unitOrdinal != null && !unit) throw new ArgumentError('找不到这一讲。')
+      const scope = input.unitOrdinal == null ? 'course' : `unit:${input.unitOrdinal}`
+      const stamp = nowIso()
+
+      if (input.tool === 'search') {
+        const matches = searchStudyUnits(units, input.query)
+        this.saveToolArtifact(session.id, 'search', 'course', `查找：${input.query}`, {
+          query: input.query,
+          matches,
+          message: matches.length
+            ? `找到 ${matches.length} 处原文，引用都来自这门课。`
+            : '没找到相关原文。换个关键词，或先确认这份材料里有没有讲过。',
+        }, stamp)
+        return ok(requestId, this.detail(session.id))
+      }
+
+      if (input.tool === 'outline') {
+        const items = outlineStudyUnits(units, input.unitOrdinal)
+        if (items.length === 0) throw new ArgumentError('这门课还没有小讲，暂时列不出大纲。')
+        this.saveToolArtifact(
+          session.id,
+          'outline',
+          scope,
+          unit ? `复习大纲 · ${unit.title}` : '整门课复习大纲',
+          { items },
+          stamp,
+        )
+        return ok(requestId, this.detail(session.id))
+      }
+
+      this.config()
+      const client = this.client({ sessionId: session.id, documentVersionId: session.document_version_id })
+      const habits = this.readHabits(session)
+
+      if (input.tool === 'summary') {
+        const material = studyMaterial(units, input.unitOrdinal)
+        const prompt = buildStudySummaryToolPrompt({ title: session.title, material, unit, habits })
+        const text = (await client.complete(prompt.system, prompt.user, 2200, 'disabled', 'tool-summary')).trim()
+        if (!text) throw new AiError('AI_FAILED', '模型没有返回总结。')
+        this.saveToolArtifact(session.id, 'summary', scope, unit ? `总结 · ${unit.title}` : '整门课总结', {
+          text,
+          citations: citationsForUnits(units, input.unitOrdinal),
+        }, stamp)
+        return ok(requestId, this.detail(session.id))
+      }
+
+      if (input.tool === 'quiz') {
+        const material = studyMaterial(units, input.unitOrdinal)
+        const prompt = buildStudyQuizPrompt({ title: session.title, material, unit, habits })
+        const raw = await client.complete(prompt.system, prompt.user, 2200, 'disabled', 'tool-quiz')
+        const parsed = parseStudyQuiz(raw)
+        const questions: StudyQuizQuestion[] = parsed.questions.map((question) => ({
+          id: randomUUID(),
+          prompt: question.prompt,
+          hint: question.hint,
+          source: question.source,
+        }))
+        this.saveToolArtifact(session.id, 'quiz', scope, unit ? `题测 · ${unit.title}` : '整门课题测', {
+          questions,
+          graded: false,
+        }, stamp)
+        return ok(requestId, this.detail(session.id))
+      }
+
+      if (input.tool === 'quiz-grade') {
+        const existing = this.store.findArtifact(session.id, 'quiz', scope)
+        if (!existing) throw new ArgumentError('先让老师出题，再提交答案。')
+        const quizBody = parseArtifactBody(existing.body_json)
+        const questions = Array.isArray(quizBody.questions) ? quizBody.questions as StudyQuizQuestion[] : []
+        if (questions.length === 0) throw new ArgumentError('这份题测没有题目，请重新出题。')
+        if (input.answers.length !== questions.length) throw new ArgumentError('还有题没答，答完再判。')
+        for (const answer of input.answers) {
+          if (!questions.some((question) => question.id === answer.questionId)) {
+            throw new ArgumentError('提交的题目不属于这次题测。')
+          }
+        }
+        const material = studyMaterial(units, input.unitOrdinal)
+        const prompt = buildStudyQuizGradePrompt({
+          title: session.title,
+          material,
+          unit,
+          questions: questions.map((question) => ({ id: question.id, prompt: question.prompt, source: question.source })),
+          answers: input.answers,
+        })
+        const raw = await client.complete(prompt.system, prompt.user, 1800, 'disabled', 'tool-quiz-grade')
+        const grade = parseQuizGrade(raw)
+        this.saveToolArtifact(session.id, 'quiz', scope, existing.title, {
+          ...quizBody,
+          questions,
+          answers: input.answers,
+          graded: true,
+          feedback: grade.feedback,
+          gaps: grade.gaps,
+        }, stamp)
+        return ok(requestId, this.detail(session.id))
+      }
+
+      if (input.tool === 'teachback') {
+        const material = studyMaterial(units, input.unitOrdinal)
+        const prompt = buildStudyTeachbackPrompt({ title: session.title, material, unit, answer: input.answer })
+        const raw = await client.complete(prompt.system, prompt.user, 1800, 'disabled', 'tool-teachback')
+        const feedback = parseTeachback(raw)
+        this.saveToolArtifact(
+          session.id,
+          'teachback',
+          scope,
+          unit ? `复述 · ${unit.title}` : '整门课复述',
+          { answer: input.answer, feedback: feedback.feedback, covered: feedback.covered, gaps: feedback.gaps },
+          stamp,
+        )
+        return ok(requestId, this.detail(session.id))
+      }
+
+      throw new ArgumentError('这个老师工具还不支持。')
+    } catch (error) {
+      return this.failure(requestId, error)
+    }
+  }
+
   async finish(body: unknown): Promise<Result<StudySessionDetail>> {
     const requestId = randomUUID()
     try {
@@ -307,8 +499,6 @@ export class StudyService {
       this.config()
       const units = this.units(sessionId)
       const messages = this.messages(sessionId)
-      this.usageSessionId = session.id
-      this.usageVersionId = session.document_version_id
       const checks = this.checks(sessionId)
       const prompt = buildStudySummaryPrompt({
         title: session.title,
@@ -317,7 +507,7 @@ export class StudyService {
         messages,
         checks,
       })
-      const client = this.client()
+      const client = this.client({ sessionId: session.id, documentVersionId: session.document_version_id })
       const raw = await client.complete(prompt.system, prompt.user, 3000, 'disabled', 'summary')
       const summary = parseStudySummary(raw)
       this.store.saveSummary(sessionId, summary, nowIso())
@@ -600,6 +790,7 @@ export class StudyService {
       materialChunks: Number(session.material_chunks ?? 1),
       habits: this.readHabits(session),
       summary,
+      artifacts: this.store.listArtifacts(sessionId).map(artifactFromRow),
       teacherNote: this.options.teacher?.noteForSession(sessionId) ?? null,
       usage: this.usageOf(sessionId),
     }
@@ -610,7 +801,55 @@ export class StudyService {
     try {
       return this.store.usageOfSession(sessionId)
     } catch {
-      return { calls: 0, promptTokens: 0, cachedTokens: 0, completionTokens: 0 }
+      return {
+        calls: 0,
+        promptTokens: 0,
+        cachedTokens: 0,
+        cacheMissTokens: 0,
+        completionTokens: 0,
+        reasoningTokens: 0,
+        reportedCalls: 0,
+        estimatedCalls: 0,
+      }
+    }
+  }
+
+  /**
+   * 用量核对：本机按调用类型拆开的 token + DeepSeek 官方余额。
+   * DeepSeek 没有逐请求 usage API，官方用量只能在开放平台「用量信息」页导出 CSV 对账；
+   * 余额能查就直接查，查不到只回错误文案，不影响本机统计。
+   */
+  async usageAudit(body: unknown): Promise<Result<StudyUsageAudit>> {
+    const requestId = randomUUID()
+    try {
+      const sessionId = this.sessionId(body)
+      const session = this.requireSession(sessionId)
+      let kinds: StudyUsageKind[] = []
+      try {
+        kinds = this.store.usageKinds(sessionId)
+      } catch {
+        kinds = []
+      }
+      let balance: StudyUsageAudit['balance'] = null
+      let balanceError: string | null = null
+      try {
+        balance = await this.client({
+          sessionId: session.id,
+          documentVersionId: session.document_version_id,
+        }).balance()
+      } catch (error) {
+        balanceError = error instanceof Error ? error.message : '余额读取失败。'
+      }
+      return ok(requestId, {
+        usage: this.usageOf(sessionId),
+        kinds,
+        balance,
+        balanceError,
+        officialNote:
+          'DeepSeek 官方没有逐请求用量查询接口；按 Key 的用量请登录开放平台「用量信息」页，选择月份后点「导出」，解压后看 amount CSV。这里显示的是本机每次调用真实回传的 usage。',
+      })
+    } catch (error) {
+      return this.failure(requestId, error)
     }
   }
 
@@ -669,24 +908,28 @@ export class StudyService {
     return ai
   }
 
-  private client(): AiClient {
+  private client(scope: UsageScope): AiClient {
     const ai = this.config()
     // 82 页课件的拆课 JSON 可能要两三分钟才能吐完，120 秒会把长课件拦腰打断。
     return new AiClient(ai, this.options.fetchImpl ?? globalThis.fetch, 300_000, (kind, usage) => {
-      this.recordUsage(kind, usage)
+      this.recordUsage(scope, kind, usage)
     }, () => this.options.budget?.beforeCall())
   }
 
-  /** token 用量落库：口径见 ai_usage；cached_tokens 是 DeepSeek 前缀缓存命中的部分。 */
-  private recordUsage(kind: string, usage: { promptTokens: number; cachedTokens: number; completionTokens: number }): void {
+  /** token 用量落库：归属由调用点显式传入，避免并发开课/发消息时串到别的课程名下。 */
+  private recordUsage(scope: UsageScope, kind: string, usage: AiUsage): void {
     try {
       this.store.insertUsage({
-        sessionId: this.usageSessionId,
-        documentVersionId: this.usageVersionId,
+        sessionId: scope.sessionId,
+        documentVersionId: scope.documentVersionId,
         kind,
         promptTokens: usage.promptTokens,
         cachedTokens: usage.cachedTokens,
+        cacheMissTokens: usage.cacheMissTokens,
         completionTokens: usage.completionTokens,
+        reasoningTokens: usage.reasoningTokens,
+        providerReported: usage.providerReported,
+        model: usage.model,
         createdAt: nowIso(),
       })
     } catch {
@@ -724,7 +967,7 @@ export class StudyService {
     return { requestId, documentVersionId, title, subject }
   }
 
-  private sendBody(body: unknown): { sessionId: string; content: string; unitOrdinal: number | null } {
+  private sendBody(body: unknown): { sessionId: string; content: string; unitOrdinal: number | null; mode: StudyMode; skill: StudySkill } {
     if (!isPlainObject(body)) throw new ArgumentError('请求格式不正确。')
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
     if (!isUuid(sessionId)) throw new ArgumentError('sessionId 不是有效的课堂。')
@@ -735,11 +978,131 @@ export class StudyService {
     if (ordinal != null && (typeof ordinal !== 'number' || !Number.isInteger(ordinal) || ordinal < 0)) {
       throw new ArgumentError('unitOrdinal 不是有效的小讲序号。')
     }
-    return { sessionId, content, unitOrdinal: typeof ordinal === 'number' ? ordinal : null }
+    const rawMode = body.mode
+    if (rawMode != null && rawMode !== 'direct' && rawMode !== 'guided') {
+      throw new ArgumentError('mode 只能是 direct 或 guided。')
+    }
+    const rawSkill = body.skill
+    if (rawSkill != null && !isStudySkill(rawSkill)) throw new ArgumentError('skill 不是有效的教学技能。')
+    return {
+      sessionId,
+      content,
+      unitOrdinal: typeof ordinal === 'number' ? ordinal : null,
+      mode: rawMode === 'guided' ? 'guided' : 'direct',
+      skill: typeof rawSkill === 'string' ? rawSkill : 'auto',
+    }
   }
 
-  private checkBody(body: unknown): { sessionId: string; unitOrdinal: number; segmentIndex: number; answer: string } {
+  private toolBody(body: unknown): {
+    sessionId: string
+    tool: StudyToolKind
+    unitOrdinal: number | null
+    query: string
+    answer: string
+    answers: StudyQuizAnswer[]
+  } {
     if (!isPlainObject(body)) throw new ArgumentError('请求格式不正确。')
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
+    if (!isUuid(sessionId)) throw new ArgumentError('sessionId 不是有效的课堂。')
+    const tool = typeof body.tool === 'string' ? body.tool : ''
+    const allowed: StudyToolKind[] = ['search', 'summary', 'outline', 'quiz', 'quiz-grade', 'teachback']
+    if (!(allowed as string[]).includes(tool)) throw new ArgumentError('这个老师工具不在白名单里。')
+    const ordinal = body.unitOrdinal
+    if (ordinal != null && (typeof ordinal !== 'number' || !Number.isInteger(ordinal) || ordinal < 0)) {
+      throw new ArgumentError('unitOrdinal 不是有效的小讲序号。')
+    }
+    const unitOrdinal = typeof ordinal === 'number' ? ordinal : null
+    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    if (tool === 'search') {
+      if (!query) throw new ArgumentError('先写要查找的词。')
+      if (query.length > MAX_SEARCH_QUERY_CHARS) throw new ArgumentError(`查找词最多 ${MAX_SEARCH_QUERY_CHARS} 个字。`)
+    }
+    const answer = typeof body.answer === 'string' ? body.answer.trim() : ''
+    if (tool === 'teachback') {
+      if (answer.length < 20) throw new ArgumentError('先写至少 20 个字的复述。')
+      if (answer.length > MAX_ANSWER_CHARS) throw new ArgumentError(`一次最多答 ${MAX_ANSWER_CHARS} 个字。`)
+    }
+    const rawAnswers = Array.isArray(body.answers) ? body.answers : []
+    if (tool === 'quiz-grade' && rawAnswers.length === 0) throw new ArgumentError('先写下你的答案。')
+    if (tool === 'quiz-grade' && rawAnswers.length > 3) throw new ArgumentError('一次最多提交 3 道题。')
+    const answers = rawAnswers.map((item) => {
+      const row = isPlainObject(item) ? item : {}
+      const questionId = typeof row.questionId === 'string' ? row.questionId.trim() : ''
+      const text = typeof row.answer === 'string' ? row.answer.trim() : ''
+      if (!questionId || !text) throw new ArgumentError('每道题都要作答。')
+      if (text.length > MAX_TOOL_ANSWER_CHARS) throw new ArgumentError(`每道题最多答 ${MAX_TOOL_ANSWER_CHARS} 个字。`)
+      return { questionId, answer: text }
+    })
+    return { sessionId, tool: tool as StudyToolKind, unitOrdinal, query, answer, answers }
+  }
+
+  /** 自然语言工具入口的回复：先把结果落进课程资料，再在对话里给一句可读的交代。 */
+  private toolChatReply(intent: StudyToolKind, artifact: StudyArtifact | undefined, unit: StudyUnit | null): string {
+    if (!artifact) return '这次工具没有返回结果，先按普通讲解继续。'
+    if (intent === 'summary') {
+      return `我把${unit ? `「${unit.title}」` : '整门课'}的总结放进课程资料了。\n\n${artifact.body.text ?? ''}`.trim()
+    }
+    if (intent === 'outline') {
+      const items = artifact.body.items ?? []
+      return [
+        `复习大纲列好了，放在课程资料里。${unit ? `这次只列「${unit.title}」。` : '这次列整门课。'}`,
+        ...items.map((item, index) => `${index + 1}. ${item.title}`),
+      ].join('\n')
+    }
+    if (intent === 'search') {
+      const matches = artifact.body.matches ?? []
+      if (matches.length === 0) return artifact.body.message ?? '没找到相关原文。'
+      return [
+        `找到 ${matches.length} 处原文，都是这门课里的：`,
+        ...matches.slice(0, 3).map(
+          (match, index) =>
+            `${index + 1}. 第 ${match.unitOrdinal + 1} 讲「${match.unitTitle}」：${match.excerpt.slice(0, 80)}`,
+        ),
+      ].join('\n')
+    }
+    if (intent === 'quiz') {
+      const questions = artifact.body.questions ?? []
+      return [
+        `我出了 ${questions.length} 道题，放在课程资料里。先自己答，答完再交给我判。`,
+        ...questions.map((question, index) => `${index + 1}. ${question.prompt}`),
+      ].join('\n\n')
+    }
+    if (intent === 'teachback') {
+      const gaps = artifact.body.gaps ?? []
+      return [
+        '我按原文看了你的复述。',
+        artifact.body.feedback ?? '',
+        ...(gaps.length ? ['还没讲到的：', ...gaps.map((gap, index) => `${index + 1}. ${gap}`)] : []),
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    }
+    return '这个老师工具已经处理好了。'
+  }
+
+  /** 同 kind/scope 覆盖旧结果；不存在时新建。 */
+  private saveToolArtifact(
+    sessionId: string,
+    kind: StudyArtifactRow['kind'],
+    scope: string,
+    title: string,
+    body: Record<string, unknown>,
+    stamp: string,
+  ): void {
+    const existing = this.store.findArtifact(sessionId, kind, scope)
+    this.store.upsertArtifact({
+      id: existing?.id ?? randomUUID(),
+      session_id: sessionId,
+      kind,
+      scope,
+      title: title.slice(0, 80),
+      body_json: JSON.stringify(body),
+      created_at: existing?.created_at ?? stamp,
+      updated_at: stamp,
+    })
+  }
+
+  private checkBody(body: unknown): { sessionId: string; unitOrdinal: number; segmentIndex: number; answer: string } {    if (!isPlainObject(body)) throw new ArgumentError('请求格式不正确。')
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
     if (!isUuid(sessionId)) throw new ArgumentError('sessionId 不是有效的课堂。')
     const unitOrdinal = body.unitOrdinal
@@ -783,6 +1146,27 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   })
   await Promise.all(workers)
   return results
+}
+
+function artifactFromRow(row: StudyArtifactRow): StudyArtifact {
+  return {
+    id: row.id,
+    kind: row.kind,
+    scope: row.scope,
+    title: row.title,
+    body: parseArtifactBody(row.body_json),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function parseArtifactBody(raw: string): StudyArtifact['body'] {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return isPlainObject(parsed) ? parsed as StudyArtifact['body'] : {}
+  } catch {
+    return {}
+  }
 }
 
 function artifactIdFrom(raw: string | undefined): string {

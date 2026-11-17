@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { DocumentListItem } from '../../shared/contract'
-import type { StudyCheck, StudyProgress, StudySessionDetail, StudySessionListItem, StudyUnit } from '../../shared/study'
+import type {
+  DocumentListItem,
+} from '../../shared/contract'
+import type {
+  StudyCheck,
+  StudyProgress,
+  StudyQuizAnswer,
+  StudySessionDetail,
+  StudySessionListItem,
+  StudyToolKind,
+  StudyUnit,
+  StudyUsageAudit,
+} from '../../shared/study'
 import { MathText } from '../components/MathText'
 import { TeacherProfile } from './TeacherProfile'
+import { StudyTools } from './StudyTools'
 import {
   AVOID_OPTIONS,
   DEFAULT_HABITS,
@@ -13,7 +25,7 @@ import {
 } from '../../teaching/habits'
 
 type Notify = (tone: 'info' | 'bad', text: string) => void
-type Busy = 'create' | 'send' | 'finish' | 'load' | null
+type Busy = 'create' | 'send' | 'finish' | 'tool' | 'load' | null
 
 function newRequestId(): string {
   return crypto.randomUUID()
@@ -74,6 +86,8 @@ export function StudyView({
   // 侧边栏可收放：大纲能收起，把宽度让给讲解正文；课程资料收进抽屉，不再常驻右栏。
   const [outlineOpen, setOutlineOpen] = useState(true)
   const [materialsOpen, setMaterialsOpen] = useState(false)
+  // 课程资料抽屉里的老师工具：点“找原文/我讲给你听”后把对应输入区展开。
+  const [toolFocus, setToolFocus] = useState<StudyToolKind | null>(null)
   // 「更多」菜单：老师档案、文稿库、再开一门和清理动作都收在这里，顶部只留主路径。
   const [moreOpen, setMoreOpen] = useState(false)
   const [teacherOpen, setTeacherOpen] = useState(false)
@@ -186,6 +200,11 @@ export function StudyView({
 
   const activeUnit = detail?.units.find((unit) => unit.id === unitId) ?? detail?.units[0] ?? null
 
+  useEffect(() => {
+    setToolFocus(null)
+    setMaterialsOpen(false)
+  }, [detail?.sessionId])
+
   async function createCourse() {
     if (!api || !selectedDoc) {
       notify('bad', '先在左边选一份文稿，或者在「文稿」里上传课件。')
@@ -234,6 +253,7 @@ export function StudyView({
     }
     setBusy('send')
     setError('')
+    const before = new Map(detail.artifacts.map((item) => [item.id, item.updatedAt]))
     const result = await api.study.send({
       sessionId: detail.sessionId,
       content,
@@ -247,6 +267,45 @@ export function StudyView({
     setDetail(result.data)
     setQuestion('')
     setBusy(null)
+    const changed = result.data.artifacts.find((item) => before.get(item.id) !== item.updatedAt)
+    if (changed) {
+      setMaterialsOpen(true)
+      setToolFocus(changed.kind)
+    }
+  }
+
+  async function runTool(
+    tool: StudyToolKind,
+    payload: { query?: string; answer?: string; answers?: StudyQuizAnswer[] } = {},
+  ): Promise<boolean> {
+    if (!api || !detail || busy) return false
+    setBusy('tool')
+    setError('')
+    const result = await api.study.tool({
+      sessionId: detail.sessionId,
+      tool,
+      unitOrdinal: activeUnit?.ordinal ?? null,
+      ...payload,
+    })
+    setBusy(null)
+    if (!result.ok) {
+      setError(result.error.message)
+      notify('bad', result.error.message)
+      return false
+    }
+    setDetail(result.data)
+    setMaterialsOpen(true)
+    setToolFocus(tool === 'quiz-grade' ? 'quiz' : tool)
+    const labels: Partial<Record<StudyToolKind, string>> = {
+      search: '老师找到了本地原文。',
+      summary: '总结已放进课程资料。',
+      outline: '复习大纲已放进课程资料。',
+      quiz: '题测已放进课程资料，先答再判。',
+      'quiz-grade': '老师看完了你的作答。',
+      teachback: '老师听完了你的复述。',
+    }
+    if (labels[tool]) notify('info', labels[tool]!)
+    return true
   }
 
   async function finishCourse() {
@@ -348,6 +407,28 @@ export function StudyView({
                 <button className="ghost" onClick={() => { setMoreOpen((open) => !open); setConfirmAction(null) }}>更多</button>
                 {moreOpen ? (
                   <div className="study-manage-menu">
+                    <p className="study-menu-label">老师能做什么</p>
+                    <button
+                      disabled={busy !== null}
+                      onClick={() => { setMoreOpen(false); setMaterialsOpen(true); void runTool('summary') }}
+                    >总结这一讲</button>
+                    <button
+                      disabled={busy !== null}
+                      onClick={() => { setMoreOpen(false); setMaterialsOpen(true); void runTool('quiz') }}
+                    >考考我这讲</button>
+                    <button
+                      disabled={busy !== null}
+                      onClick={() => { setMoreOpen(false); void runTool('outline') }}
+                    >列复习大纲</button>
+                    <button
+                      disabled={busy !== null}
+                      onClick={() => { setMoreOpen(false); setMaterialsOpen(true); setToolFocus('search') }}
+                    >找原文</button>
+                    <button
+                      disabled={busy !== null}
+                      onClick={() => { setMoreOpen(false); setMaterialsOpen(true); setToolFocus('teachback') }}
+                    >我讲给你听</button>
+                    <div className="study-menu-divider" />
                     <p className="study-menu-label">这门课</p>
                     <button onClick={() => { setMoreOpen(false); setTeacherOpen(true) }}>老师档案</button>
                     <button onClick={() => { setMoreOpen(false); onOpenDocs() }}>回到文稿库</button>
@@ -587,6 +668,10 @@ export function StudyView({
           detail={detail}
           busy={busy}
           notify={notify}
+          toolFocus={toolFocus}
+          onToolFocus={setToolFocus}
+          onTool={runTool}
+          unitOrdinal={activeUnit?.ordinal ?? null}
           onFinish={() => void finishCourse()}
           onNoteChange={(note) => setDetail((current) => current ? { ...current, teacherNote: note } : current)}
         />
@@ -603,6 +688,10 @@ function CourseMaterials({
   detail,
   busy,
   notify,
+  toolFocus,
+  onToolFocus,
+  onTool,
+  unitOrdinal,
   onFinish,
   onNoteChange,
 }: {
@@ -611,6 +700,10 @@ function CourseMaterials({
   detail: StudySessionDetail
   busy: Busy
   notify: Notify
+  toolFocus: StudyToolKind | null
+  onToolFocus: (tool: StudyToolKind | null) => void
+  onTool: (tool: StudyToolKind, payload?: { query?: string; answer?: string; answers?: StudyQuizAnswer[] }) => Promise<boolean>
+  unitOrdinal: number | null
   onFinish: () => void
   onNoteChange: (note: StudySessionDetail['teacherNote']) => void
 }) {
@@ -627,6 +720,14 @@ function CourseMaterials({
         </header>
 
         <div className="course-materials-body">
+          <StudyTools
+            detail={detail}
+            unitOrdinal={unitOrdinal}
+            focus={toolFocus}
+            busy={busy}
+            onFocus={onToolFocus}
+            onRun={onTool}
+          />
           <div className="course-materials-column">
             <section className="study-overview">
               <div className="study-outline-title">
@@ -670,7 +771,7 @@ function CourseMaterials({
                 <p className="quiet">还没有手记。生成学习分析总结时，老师会一起写下这次课的四段手记。</p>
               </section>
             )}
-            <UsageCard usage={detail.usage} />
+            <UsageCard usage={detail.usage} sessionId={detail.sessionId} />
           </div>
         </div>
       </div>
@@ -882,9 +983,23 @@ function tokenLabel(value: number): string {
 }
 
 /** 这门课真实花掉的 token 与缓存命中：让学生看到钱花在哪，也能确认缓存真的省了。 */
-function UsageCard({ usage }: { usage: StudySessionDetail['usage'] }) {
+function UsageCard({ usage, sessionId }: { usage: StudySessionDetail['usage']; sessionId: string }) {
+  const [audit, setAudit] = useState<StudyUsageAudit | null>(null)
+  const [auditError, setAuditError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
   if (!usage || usage.calls === 0) return null
+  const api = window.desk
+  if (!api) return null
   const hit = usage.promptTokens > 0 ? Math.round((usage.cachedTokens / usage.promptTokens) * 100) : 0
+  const miss = usage.cacheMissTokens > 0 ? usage.cacheMissTokens : Math.max(0, usage.promptTokens - usage.cachedTokens)
+  const check = async () => {
+    setChecking(true)
+    setAuditError(null)
+    const result = await api.study.usageAudit({ sessionId })
+    setChecking(false)
+    if (result.ok) setAudit(result.data)
+    else setAuditError(result.error.message)
+  }
   return (
     <section className="study-usage">
       <div className="study-outline-title">
@@ -892,13 +1007,71 @@ function UsageCard({ usage }: { usage: StudySessionDetail['usage'] }) {
         <span className="chip">{usage.calls} 次调用</span>
       </div>
       <p>
-        输入 {tokenLabel(usage.promptTokens)} · 输出 {tokenLabel(usage.completionTokens)} tokens
+        输入 {tokenLabel(usage.promptTokens)}（命中 {tokenLabel(usage.cachedTokens)} / 未命中 {tokenLabel(miss)}）
+        · 输出 {tokenLabel(usage.completionTokens)} tokens
+        {usage.reasoningTokens > 0 ? `（其中推理 ${tokenLabel(usage.reasoningTokens)}）` : ''}
       </p>
       <p className="study-usage-hit">
-        前缀缓存命中 {tokenLabel(usage.cachedTokens)}（{hit}%）<span>{hit >= 40 ? '命中正常，追问越多次越便宜' : '命中偏低：多在同讲里追问、少切讲，命中率会上升'}</span>
+        前缀缓存命中 {tokenLabel(usage.cachedTokens)}（{hit}%）
+        <span>{hit >= 40 ? '命中正常，同一讲里继续追问会更便宜' : '命中偏低：换讲、换技能或长间隔都会打断前缀缓存'}</span>
       </p>
+      {usage.estimatedCalls > 0 ? (
+        <p className="warning">
+          有 {usage.estimatedCalls} 次调用没有返回 usage，这部分按 0 估算；真实消耗可能更高。其余
+          {usage.reportedCalls} 次由供应商真实回传。
+        </p>
+      ) : (
+        <p className="quiet">这 {usage.reportedCalls} 次调用都由供应商真实回传 usage，可直接与官方账单对账。</p>
+      )}
+      <div className="study-usage-actions">
+        <button className="ghost" onClick={() => void check()} disabled={checking}>
+          {checking ? '正在核对余额…' : '核对官方余额'}
+        </button>
+      </div>
+      {auditError ? <p className="warning">{auditError}</p> : null}
+      {audit ? (
+        <div className="study-usage-audit">
+          {audit.kinds.length ? (
+            <div className="study-usage-kinds">
+              {audit.kinds.map((row) => (
+                <p key={row.kind}>
+                  {usageKindLabel(row.kind)}：{row.calls} 次 · 输入 {tokenLabel(row.promptTokens)} · 输出 {tokenLabel(row.completionTokens)}
+                  {row.estimatedCalls > 0 ? ` · 估算 ${row.estimatedCalls} 次` : ''}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {audit.balance?.length ? (
+            <p>
+              官方余额：
+              {audit.balance.map((item) => `${item.totalBalance} ${item.currency}（赠送 ${item.grantedBalance} / 充值 ${item.toppedUpBalance}）`).join('；')}
+            </p>
+          ) : (
+            <p className="quiet">{audit.balanceError ?? '官方接口没有返回余额。'}</p>
+          )}
+          <p className="quiet">{audit.officialNote}</p>
+        </div>
+      ) : null}
     </section>
   )
+}
+
+function usageKindLabel(kind: string): string {
+  const labels: Record<string, string> = {
+    chat: '讲解对话',
+    plan: '开课拆课',
+    'plan-repair': '拆课重试',
+    digest: '分段理解',
+    vision: '读图',
+    ocr: 'OCR',
+    summary: '学习总结',
+    'teacher-note': '老师手记',
+    'tool-summary': '工具总结',
+    'tool-quiz': '题测出题',
+    'tool-quiz-grade': '题测判题',
+    'tool-teachback': '复述反馈',
+  }
+  return labels[kind] ?? kind
 }
 
 function SummaryView({ detail }: { detail: StudySessionDetail }) {  const summary = detail.summary

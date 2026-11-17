@@ -166,6 +166,77 @@ export type TeacherNoteDraft = {
   memories: TeacherObservation[]
 }
 
+export type StudyQuizDraft = {
+  questions: Array<{ prompt: string; hint: string; source: string }>
+}
+
+export type QuizGradeDraft = {
+  feedback: string
+  gaps: string[]
+}
+
+export type TeachbackDraft = {
+  feedback: string
+  covered: string[]
+  gaps: string[]
+}
+
+export function parseStudyQuiz(raw: string): StudyQuizDraft {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(unwrap(raw))
+  } catch (error) {
+    if (error instanceof ArgumentError) throw error
+    throw new ArgumentError('模型返回的题测不是 JSON 格式。')
+  }
+  const root = record(parsed)
+  const questions = list(root.questions)
+    .map((item) => {
+      const row = record(item)
+      return {
+        prompt: text(row.prompt),
+        hint: text(row.hint),
+        source: text(row.source),
+      }
+    })
+    .filter((item) => item.prompt && item.source)
+    .slice(0, 3)
+  if (questions.length === 0) throw new ArgumentError('模型没有返回可用的题测题目。')
+  return { questions }
+}
+
+export function parseQuizGrade(raw: string): QuizGradeDraft {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(unwrap(raw))
+  } catch (error) {
+    if (error instanceof ArgumentError) throw error
+    throw new ArgumentError('模型返回的判题结果不是 JSON 格式。')
+  }
+  const root = record(parsed)
+  const feedback = text(root.feedback)
+  if (!feedback) throw new ArgumentError('模型没有返回判题反馈。')
+  return { feedback, gaps: stringList(root.gaps).slice(0, 6) }
+}
+
+export function parseTeachback(raw: string): TeachbackDraft {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(unwrap(raw))
+  } catch (error) {
+    if (error instanceof ArgumentError) throw error
+    throw new ArgumentError('模型返回的复述反馈不是 JSON 格式。')
+  }
+  const root = record(parsed)
+  const feedback = text(root.feedback)
+  if (!feedback) throw new ArgumentError('模型没有返回复述反馈。')
+  return {
+    feedback,
+    covered: stringList(root.covered).slice(0, 8),
+    gaps: stringList(root.gaps).slice(0, 8),
+  }
+}
+
 export function parseTeacherNote(raw: string): TeacherNoteDraft {
   let parsed: unknown
   try {

@@ -1,5 +1,5 @@
 import type { AppDatabase } from './database'
-import type { StudyMessage, StudyMessageRole, StudySessionListItem, StudyStatus, StudySummary } from '../shared/study'
+import type { StudyArtifactKind, StudyMessage, StudyMessageRole, StudySessionListItem, StudyStatus, StudySummary } from '../shared/study'
 
 export type StudySessionRow = {
   id: string
@@ -50,6 +50,17 @@ export type StudyCheckRow = {
   question: string
   answer: string
   created_at: string
+}
+
+export type StudyArtifactRow = {
+  id: string
+  session_id: string
+  kind: StudyArtifactKind
+  scope: string
+  title: string
+  body_json: string
+  created_at: string
+  updated_at: string
 }
 
 export type SessionBundle = {
@@ -221,9 +232,55 @@ export class StudyStore {
     )
   }
 
-  /** 同一讲同一句只保留最后一次作答，改答案不会堆出多份记录。 */
-  upsertCheck(row: StudyCheckRow): void {
+  listArtifacts(sessionId: string): StudyArtifactRow[] {
+    return this.db.all<StudyArtifactRow>(
+      'SELECT * FROM study_artifacts WHERE session_id = ? ORDER BY updated_at DESC, rowid DESC',
+      sessionId,
+    )
+  }
+
+  findArtifact(sessionId: string, kind: StudyArtifactKind, scope: string): StudyArtifactRow | undefined {
+    return this.db.get<StudyArtifactRow>(
+      'SELECT * FROM study_artifacts WHERE session_id = ? AND kind = ? AND scope = ?',
+      sessionId,
+      kind,
+      scope,
+    )
+  }
+
+  /** 同 kind/scope 覆盖旧版本；每门课最多保留 20 条，避免课堂资料无限膨胀。 */
+  upsertArtifact(row: StudyArtifactRow): void {
     this.db.transaction(() => {
+      this.db.run(
+        `INSERT INTO study_artifacts(id, session_id, kind, scope, title, body_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id, kind, scope) DO UPDATE SET
+           title = excluded.title,
+           body_json = excluded.body_json,
+           updated_at = excluded.updated_at`,
+        row.id,
+        row.session_id,
+        row.kind,
+        row.scope,
+        row.title,
+        row.body_json,
+        row.created_at,
+        row.updated_at,
+      )
+      this.db.run(
+        `DELETE FROM study_artifacts
+         WHERE session_id = ? AND id NOT IN (
+           SELECT id FROM study_artifacts WHERE session_id = ?
+           ORDER BY updated_at DESC, rowid DESC LIMIT 20
+         )`,
+        row.session_id,
+        row.session_id,
+      )
+    })
+  }
+
+  /** 同一讲同一句只保留最后一次作答，改答案不会堆出多份记录。 */
+  upsertCheck(row: StudyCheckRow): void {    this.db.transaction(() => {
       this.db.run(
         `INSERT INTO study_checks(id, session_id, unit_ordinal, segment_index, question, answer, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -274,15 +331,23 @@ export class StudyStore {
   }
 
   insertUsage(row: UsageInsert): void {
+    const prompt = Math.max(0, Math.round(row.promptTokens))
+    const cached = Math.max(0, Math.round(row.cachedTokens))
     this.db.run(
-      `INSERT INTO ai_usage(session_id, document_version_id, kind, prompt_tokens, cached_tokens, completion_tokens, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ai_usage(
+         session_id, document_version_id, kind, prompt_tokens, cached_tokens, cache_miss_tokens,
+         completion_tokens, reasoning_tokens, provider_reported, model, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       row.sessionId,
       row.documentVersionId,
       row.kind,
-      row.promptTokens,
-      row.cachedTokens,
-      row.completionTokens,
+      prompt,
+      cached,
+      Math.max(0, Math.round(row.cacheMissTokens ?? Math.max(0, prompt - cached))),
+      Math.max(0, Math.round(row.completionTokens)),
+      Math.max(0, Math.round(row.reasoningTokens ?? 0)),
+      row.providerReported === false ? 0 : 1,
+      row.model ?? '',
       row.createdAt,
     )
   }
@@ -297,11 +362,24 @@ export class StudyStore {
   }
 
   usageOfSession(sessionId: string): UsageTotal {
-    const row = this.db.get<{ calls: number; prompt: number; cached: number; completion: number }>(
+    const row = this.db.get<{
+      calls: number
+      prompt: number
+      cached: number
+      miss: number
+      completion: number
+      reasoning: number
+      reported: number
+      estimated: number
+    }>(
       `SELECT COUNT(*) AS calls,
               COALESCE(SUM(prompt_tokens), 0) AS prompt,
               COALESCE(SUM(cached_tokens), 0) AS cached,
-              COALESCE(SUM(completion_tokens), 0) AS completion
+              COALESCE(SUM(cache_miss_tokens), 0) AS miss,
+              COALESCE(SUM(completion_tokens), 0) AS completion,
+              COALESCE(SUM(reasoning_tokens), 0) AS reasoning,
+              COALESCE(SUM(CASE WHEN provider_reported = 1 THEN 1 ELSE 0 END), 0) AS reported,
+              COALESCE(SUM(CASE WHEN provider_reported = 0 THEN 1 ELSE 0 END), 0) AS estimated
        FROM ai_usage WHERE session_id = ?`,
       sessionId,
     )
@@ -309,8 +387,51 @@ export class StudyStore {
       calls: row?.calls ?? 0,
       promptTokens: row?.prompt ?? 0,
       cachedTokens: row?.cached ?? 0,
+      cacheMissTokens: row?.miss ?? 0,
       completionTokens: row?.completion ?? 0,
+      reasoningTokens: row?.reasoning ?? 0,
+      reportedCalls: row?.reported ?? 0,
+      estimatedCalls: row?.estimated ?? 0,
     }
+  }
+
+  /** 按调用类型拆开，界面上能看清是开课、聊天、总结还是读图花掉的。 */
+  usageKinds(sessionId: string): UsageKindTotal[] {
+    return this.db.all<{
+      kind: string
+      calls: number
+      prompt: number
+      cached: number
+      miss: number
+      completion: number
+      reasoning: number
+      reported: number
+      estimated: number
+    }>(
+      `SELECT kind,
+              COUNT(*) AS calls,
+              COALESCE(SUM(prompt_tokens), 0) AS prompt,
+              COALESCE(SUM(cached_tokens), 0) AS cached,
+              COALESCE(SUM(cache_miss_tokens), 0) AS miss,
+              COALESCE(SUM(completion_tokens), 0) AS completion,
+              COALESCE(SUM(reasoning_tokens), 0) AS reasoning,
+              COALESCE(SUM(CASE WHEN provider_reported = 1 THEN 1 ELSE 0 END), 0) AS reported,
+              COALESCE(SUM(CASE WHEN provider_reported = 0 THEN 1 ELSE 0 END), 0) AS estimated
+       FROM ai_usage WHERE session_id = ?
+       GROUP BY kind
+       ORDER BY MIN(id) ASC`,
+      sessionId,
+    ).map((row) => ({
+      kind: row.kind,
+      calls: row.calls,
+      promptTokens: row.prompt,
+      cachedTokens: row.cached,
+      cacheMissTokens: row.miss,
+      completionTokens: row.completion,
+      reasoningTokens: row.reasoning,
+      reportedCalls: row.reported,
+      estimatedCalls: row.estimated,
+    }))
   }
 }
 
@@ -330,7 +451,13 @@ export type UsageInsert = {
   kind: string
   promptTokens: number
   cachedTokens: number
+  /** 不传时按 promptTokens - cachedTokens 补。 */
+  cacheMissTokens?: number
   completionTokens: number
+  reasoningTokens?: number
+  /** false：供应商没回 usage，整行只能当估算。 */
+  providerReported?: boolean
+  model?: string
   createdAt: string
 }
 
@@ -338,8 +465,14 @@ export type UsageTotal = {
   calls: number
   promptTokens: number
   cachedTokens: number
+  cacheMissTokens: number
   completionTokens: number
+  reasoningTokens: number
+  reportedCalls: number
+  estimatedCalls: number
 }
+
+export type UsageKindTotal = UsageTotal & { kind: string }
 
 export function messageFromRow(row: StudyMessageRow): StudyMessage {
   return {

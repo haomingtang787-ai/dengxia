@@ -259,6 +259,40 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
     await new Promise((resolve) => setTimeout(resolve, 500))
     return
   }
+  if (action === 'usage-audit') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开课程资料', await click('课程资料'))
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    const before = await win.webContents.executeJavaScript(
+      `(() => {
+        const card = document.querySelector('.study-usage');
+        if (!card) return '';
+        card.scrollIntoView({ block: 'center' });
+        return card.innerText;
+      })()`,
+    )
+    console.log('[smoke] 用量卡', before.replace(/\n/g, ' / '))
+    console.log('[smoke] 点击核对余额', await click('核对官方余额'))
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    const after = await win.webContents.executeJavaScript(
+      `(() => {
+        const card = document.querySelector('.study-usage');
+        return {
+          card: card?.innerText ?? '',
+          audit: document.querySelector('.study-usage-audit')?.innerText ?? '',
+        };
+      })()`,
+    )
+    console.log('[smoke] 核对后', JSON.stringify(after).slice(0, 1200))
+    // 核对结果接在用量卡下面，重新滚到卡上，截图才能同时看到真实回报/估算与官方余额。
+    await win.webContents.executeJavaScript(
+      `(() => { const card = document.querySelector('.study-usage'); card?.scrollIntoView({ block: 'end' }); return true })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    return
+  }
   if (action === 'teacher-note-edit') {
     await new Promise((resolve) => setTimeout(resolve, 700))
     await click('老师')
@@ -329,6 +363,57 @@ async function runSmokeAction(win: BrowserWindow, action: string): Promise<void>
       `(() => { const m = document.querySelector('.study-manage-menu'); return m ? m.innerText : '' })()`,
     )
     console.log('[smoke] 更多菜单', menu.replace(/\n/g, ' / '))
+    return
+  }
+  if (action === 'teacher-tools') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log('[smoke] 打开更多菜单', await click('更多'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const menu = await win.webContents.executeJavaScript(
+      `(() => { const m = document.querySelector('.study-manage-menu'); return m ? m.innerText : '' })()`,
+    )
+    console.log('[smoke] 老师工具菜单', menu.replace(/\n/g, ' / '))
+    console.log('[smoke] 点击列复习大纲', await click('列复习大纲'))
+    await new Promise((resolve) => setTimeout(resolve, 1200))
+    const state = await win.webContents.executeJavaScript(
+      `(() => {
+        const panel = document.querySelector('.study-tools');
+        const cards = document.querySelectorAll('.study-tool-card');
+        return { open: Boolean(document.querySelector('.course-materials')), panel: panel?.innerText?.slice(0, 300) ?? '', cards: cards.length };
+      })()`,
+    )
+    console.log('[smoke] 老师工具后', JSON.stringify(state))
+    return
+  }
+  if (action === 'teacher-search') {
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    console.log('[smoke] 打开老师页', await click('老师'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log('[smoke] 打开更多菜单', await click('更多'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    console.log('[smoke] 点击找原文', await click('找原文'))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const typed = await win.webContents.executeJavaScript(
+      `(() => {
+        const input = document.querySelector('.study-tool-input input');
+        if (!input) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(input, '正交');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => { const b = [...document.querySelectorAll('.study-tool-input button')].find((x) => x.textContent.includes('找原文')); if (!b) return false; b.click(); return true })()`,
+    )
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    const state = await win.webContents.executeJavaScript(
+      `(() => { const card = document.querySelector('.study-tool-card'); return { typed: ${JSON.stringify(typed)}, clicked: ${JSON.stringify(clicked)}, card: card?.innerText?.slice(0, 300) ?? '' } })()`,
+    )
+    console.log('[smoke] 找原文后', JSON.stringify(state))
     return
   }
   if (action === 'teacher-chat') {
@@ -806,7 +891,11 @@ async function boot(): Promise<void> {
           kind,
           promptTokens: usage.promptTokens,
           cachedTokens: usage.cachedTokens,
+          cacheMissTokens: usage.cacheMissTokens,
           completionTokens: usage.completionTokens,
+          reasoningTokens: usage.reasoningTokens,
+          providerReported: usage.providerReported,
+          model: usage.model,
           createdAt: new Date().toISOString(),
         })
       } catch {

@@ -751,7 +751,7 @@ export class DocumentService {
     const estimatedCalls = Number(
       this.options.db.get<{ total: number }>(
         `SELECT COUNT(*) AS total FROM ai_usage
-         WHERE created_at >= ? AND prompt_tokens = 0 AND cached_tokens = 0 AND completion_tokens = 0`,
+         WHERE created_at >= ? AND provider_reported = 0`,
         monthStart.toISOString(),
       )?.total ?? 0,
     )

@@ -57,11 +57,11 @@ export class BudgetService {
     return Number(row?.total ?? 0)
   }
 
-  /** 供应商没返回 usage 时记录为 0/0；这些调用要明确标成“估算”，不能静默算成真实零消耗。 */
+  /** 供应商没返回 usage 时 provider_reported=0；这些调用不能静默算成真实零消耗。 */
   private estimatedCallsSince(iso: string): number {
     const row = this.db.get<{ total: number }>(
       `SELECT COUNT(*) AS total FROM ai_usage
-       WHERE created_at >= ? AND prompt_tokens = 0 AND cached_tokens = 0 AND completion_tokens = 0`,
+       WHERE created_at >= ? AND provider_reported = 0`,
       iso,
     )
     return Number(row?.total ?? 0)

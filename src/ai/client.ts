@@ -2,14 +2,30 @@ import type { ResearchSource } from '../shared/research'
 
 export type AiConfig = { baseUrl: string; model: string; apiKey: string }
 
-/** 一次模型调用的 token 用量；cachedTokens 是服务端前缀缓存命中的部分（按缓存价计费）。 */
+/**
+ * 一次模型调用的 token 用量。
+ * cachedTokens 是服务端前缀缓存命中的部分（按缓存价计费），cacheMissTokens 是未命中的输入；
+ * providerReported=false 表示供应商根本没回 usage，此时四个数字都是 0，只能当估算，不能当真实零消耗。
+ */
 export type AiUsage = {
   promptTokens: number
   cachedTokens: number
+  cacheMissTokens: number
   completionTokens: number
+  reasoningTokens: number
+  providerReported: boolean
+  model: string
 }
 
 export type AiUsageSink = (kind: string, usage: AiUsage) => void
+
+/** DeepSeek 官方余额；只有余额，没有逐请求用量。 */
+export type AiBalanceInfo = {
+  currency: string
+  totalBalance: string
+  grantedBalance: string
+  toppedUpBalance: string
+}
 
 function retryDelay(attempt: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, Math.min(4000, 800 * 2 ** attempt)))
@@ -95,6 +111,56 @@ export class AiClient {
       : []
     if (ids.length === 0) throw new AiError('AI_FAILED', '模型服务没有返回可用的模型。')
     return [...new Set(ids.map((id) => id.trim()))].slice(0, 200)
+  }
+
+  /** DeepSeek 官方余额：只能核对账户还剩多少，没有逐请求用量查询接口。 */
+  async balance(): Promise<AiBalanceInfo[]> {
+    const root = this.config.baseUrl
+      .replace(/\/+$/, '')
+      .replace(/\/chat\/completions$/, '')
+      .replace(/\/v1$/, '')
+    let host = ''
+    try {
+      host = new URL(root).hostname
+    } catch {
+      throw new AiError('AI_FAILED', '模型地址不是合法 URL。')
+    }
+    if (host !== 'api.deepseek.com') {
+      throw new AiError('AI_FAILED', '余额核对仅支持 DeepSeek 官方地址（api.deepseek.com）。')
+    }
+    if (!this.config.apiKey.trim()) throw new AiError('AI_NOT_CONFIGURED', '先在「模型」里填好密钥，再核对余额。')
+    let response: Response
+    try {
+      response = await this.fetchImpl(`${root}/user/balance`, {
+        headers: this.authHeaders(),
+        signal: AbortSignal.timeout(30_000),
+      })
+    } catch {
+      throw new AiError('AI_FAILED', '连不上 DeepSeek 余额接口，检查网络。')
+    }
+    const text = await response.text()
+    if (!response.ok) {
+      throw new AiError('AI_FAILED', `余额接口返回 ${response.status}：${text.slice(0, 160)}`)
+    }
+    let body: unknown
+    try {
+      body = JSON.parse(text)
+    } catch {
+      throw new AiError('AI_FAILED', '余额接口返回的不是 JSON。')
+    }
+    const raw = (body as { balance_infos?: unknown }).balance_infos
+    if (!Array.isArray(raw)) return []
+    return raw
+      .map((item): AiBalanceInfo => {
+        const row = (item ?? {}) as Record<string, unknown>
+        return {
+          currency: str(row.currency),
+          totalBalance: str(row.total_balance),
+          grantedBalance: str(row.granted_balance),
+          toppedUpBalance: str(row.topped_up_balance),
+        }
+      })
+      .filter((item) => item.currency.length > 0)
   }
 
   /** DeepSeek 的独立 Search 接口；只读网页，不把结果直接当成模型答案。 */
@@ -201,7 +267,7 @@ export class AiClient {
     if (typeof content !== 'string' || !content.trim()) {
       throw new AiError('AI_FAILED', '模型没有返回内容。')
     }
-    this.onUsage?.(kind, usageOf(body))
+    this.onUsage?.(kind, parseAiUsage(body))
     return content
   }
 
@@ -254,7 +320,7 @@ export class AiClient {
     }
     const content = (body as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content
     if (typeof content === 'string' && content.trim()) {
-      this.onUsage?.(input.kind ?? 'vision', usageOf(body))
+      this.onUsage?.(input.kind ?? 'vision', parseAiUsage(body))
       return content
     }
     if (Array.isArray(content)) {
@@ -264,7 +330,7 @@ export class AiClient {
         .join('\n')
         .trim()
       if (joined) {
-        this.onUsage?.(input.kind ?? 'vision', usageOf(body))
+        this.onUsage?.(input.kind ?? 'vision', parseAiUsage(body))
         return joined
       }
     }
@@ -272,16 +338,39 @@ export class AiClient {
   }
 }
 
-/** OpenAI 兼容响应里的 usage；DeepSeek 在 prompt_tokens_details.cached_tokens 里报前缀缓存命中。 */
-function usageOf(body: unknown): AiUsage {
+/**
+ * OpenAI 兼容响应里的 usage。DeepSeek 同时给 `prompt_tokens_details.cached_tokens` 和顶层的
+ * `prompt_cache_hit_tokens/prompt_cache_miss_tokens`，两处口径相同；任一处缺失都要能回退。
+ * 没有任何 usage 时返回 providerReported=false —— 调用方必须把它标成估算，不能当真实零消耗。
+ */
+export function parseAiUsage(body: unknown): AiUsage {
   const usage = (body as { usage?: Record<string, unknown> }).usage
-  if (!usage || typeof usage !== 'object') return { promptTokens: 0, cachedTokens: 0, completionTokens: 0 }
-  const details = (usage.prompt_tokens_details ?? {}) as Record<string, unknown>
+  const model = str((body as { model?: unknown }).model)
+  const empty: AiUsage = {
+    promptTokens: 0,
+    cachedTokens: 0,
+    cacheMissTokens: 0,
+    completionTokens: 0,
+    reasoningTokens: 0,
+    providerReported: false,
+    model,
+  }
+  if (!usage || typeof usage !== 'object') return empty
   const toCount = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.round(value) : 0)
+  const details = (usage.prompt_tokens_details ?? {}) as Record<string, unknown>
+  const completionDetails = (usage.completion_tokens_details ?? {}) as Record<string, unknown>
+  const cached = toCount(details.cached_tokens) || toCount(usage.prompt_cache_hit_tokens)
+  const miss = toCount(usage.prompt_cache_miss_tokens)
+  const prompt = toCount(usage.prompt_tokens) || cached + miss
   return {
-    promptTokens: toCount(usage.prompt_tokens),
-    cachedTokens: toCount(details.cached_tokens),
+    promptTokens: prompt,
+    cachedTokens: Math.min(cached, prompt || cached),
+    // 只报了总数和命中数时，未命中数由总数减出来；两者都缺才写 0。
+    cacheMissTokens: miss || Math.max(0, prompt - cached),
     completionTokens: toCount(usage.completion_tokens),
+    reasoningTokens: toCount(completionDetails.reasoning_tokens),
+    providerReported: true,
+    model,
   }
 }
 

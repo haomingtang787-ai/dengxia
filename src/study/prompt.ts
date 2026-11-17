@@ -1,7 +1,8 @@
 import type { Habits } from '../teaching/habits'
 import { habitBrief } from '../teaching/habits'
-import type { StudyCheck, StudyMessage, StudySummary, StudyUnit } from '../shared/study'
+import type { StudyCheck, StudyMessage, StudySkill, StudySummary, StudyUnit } from '../shared/study'
 import type { TeacherPromptContext } from '../shared/teacher'
+import { studySkillBrief } from './tools'
 
 const PLAN_SYSTEM = [
   '你是「灯下」的课程设计师，也是一位会当面讲课的私教。',
@@ -113,11 +114,20 @@ export function buildStudyChatPrompt(input: {
   question: string
   habits: Habits
   teacher?: TeacherPromptContext
+  skill?: Exclude<StudySkill, 'auto'>
+  mode?: 'direct' | 'guided'
 }): { system: string; user: string } {
   const teacherSystem = input.teacher
     ? `你的名字是「${input.teacher.name}」。保持同一个人格：${input.teacher.tone}。不要因为换了学科就变成另一个人。`
     : ''
-  const system = teacherSystem ? `${CHAT_SYSTEM}\n\n${teacherSystem}` : CHAT_SYSTEM
+  const skill = input.skill ?? 'explain'
+  const skillTail = `这一轮只启用一个主教学技能。${studySkillBrief(skill)}`
+  const modeTail = input.mode === 'guided'
+    ? '这次是引导模式：先接住学生的问题，再问一个具体问题定位卡点；学生说“直接讲”就立刻停止追问。'
+    : '这次是直接模式：先回答学生此刻的问题，不要先反问；需要定位卡点时只问一个短问题。'
+  // DeepSeek 前缀缓存只认从第 0 个 token 起完全一致的前缀：system 必须整门课固定，
+  // 每轮会变的技能/模式放到 user 最后，前面的人格、总览、大纲、本讲讲稿才能整段命中。
+  const system = [CHAT_SYSTEM, teacherSystem].filter(Boolean).join('\n\n')
   const unitText = input.unit
     ? [
         `当前小讲：第 ${input.unit.ordinal + 1} 讲《${input.unit.title}》（${input.unit.source}）`,
@@ -153,6 +163,8 @@ export function buildStudyChatPrompt(input: {
     history ? `最近对话：\n${history}` : '',
     `学生现在问：${input.question}`,
     '请先直接回答这个问题，再把它接回本讲原文；不要复述整段讲稿。',
+    modeTail,
+    skillTail,
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -218,6 +230,128 @@ export function buildTeacherNotePrompt(input: {
     '如果这次课有值得长期记住的具体观察，请在 memories 里最多写 2 条；没有就留空数组。',
   ].join('\n\n')
   return { system: NOTE_SYSTEM, user }
+}
+
+const SUMMARY_TOOL_SYSTEM = [
+  '你是学生的私教，正在生成一份课后学习总结。',
+  '只依据给定课程材料与原文，不要编造材料没有的内容。',
+  '输出纯文本，不要 JSON，不要 markdown 标题。',
+  '用 120 到 260 字说清这一段/这门课在讲什么、知识怎么连起来、最该记住的 2 到 3 个点。',
+  '必须至少引用一句原文；引用要逐字来自材料，不能改写。',
+].join('\n')
+
+const QUIZ_SYSTEM = [
+  '你是学生的私教，正在出题（主动回忆，不是选择题）。',
+  '只依据给定课程材料与原文，不要出材料没有的题。',
+  '只输出一个 JSON 对象，不要 markdown 代码块，不要解释。',
+  '字段：questions[{prompt, hint, source}]。',
+  'questions 1 到 3 道；prompt 是问题，hint 是一句提示，source 必须逐字引用材料中的原句。',
+  '题目要考理解、因果、对比或应用，不要只问“标题是什么”。',
+  '不要输出答案、选项或解析；学生先答，答完再判。',
+].join('\n')
+
+const GRADE_SYSTEM = [
+  '你是学生的私教，正在判题。',
+  '只依据给定课程材料、题目和学生作答，不要凭感觉加分或扣分。',
+  '只输出一个 JSON 对象，不要 markdown 代码块，不要解释。',
+  '字段：feedback, gaps[]。',
+  'feedback 用 60 到 180 字说清对在哪里、缺什么；gaps 写具体缺口，没有就空数组。',
+  '不要把“粗心”当默认解释；学生没答到的原文要点要明确指出。',
+].join('\n')
+
+const TEACHBACK_SYSTEM = [
+  '你是学生的私教，正在听学生用自己的话复述。',
+  '只依据给定课程材料与原文，不要用材料外的知识补充。',
+  '只输出一个 JSON 对象，不要 markdown 代码块，不要解释。',
+  '字段：feedback, covered[], gaps[]。',
+  'feedback 用 60 到 180 字；covered 写学生讲对的具体点；gaps 写按原文还缺的具体点。',
+  '不虚假夸奖；学生讲错时直接指出错在哪，学生讲对时也要说对在哪里。',
+].join('\n')
+
+export function buildStudySummaryToolPrompt(input: {
+  title: string
+  material: string
+  unit: StudyUnit | null
+  habits: Habits
+}): { system: string; user: string } {
+  return {
+    system: SUMMARY_TOOL_SYSTEM,
+    user: [
+      habitBrief(input.habits),
+      `课程：${input.title}`,
+      input.unit ? `范围：第 ${input.unit.ordinal + 1} 讲《${input.unit.title}》` : '范围：整门课',
+      '材料：',
+      input.material,
+      '请写这份学习总结。',
+    ].join('\n\n'),
+  }
+}
+
+export function buildStudyQuizPrompt(input: {
+  title: string
+  material: string
+  unit: StudyUnit | null
+  habits: Habits
+  count?: number
+}): { system: string; user: string } {
+  const count = Math.min(3, Math.max(1, input.count ?? 3))
+  return {
+    system: QUIZ_SYSTEM,
+    user: [
+      habitBrief(input.habits),
+      `课程：${input.title}`,
+      input.unit ? `范围：第 ${input.unit.ordinal + 1} 讲《${input.unit.title}》` : '范围：整门课',
+      `请出 ${count} 道主动回忆题。`,
+      '材料：',
+      input.material,
+    ].join('\n\n'),
+  }
+}
+
+export function buildStudyQuizGradePrompt(input: {
+  title: string
+  material: string
+  unit: StudyUnit | null
+  questions: Array<{ id: string; prompt: string; source: string }>
+  answers: Array<{ questionId: string; answer: string }>
+}): { system: string; user: string } {
+  const answerMap = new Map(input.answers.map((item) => [item.questionId, item.answer]))
+  return {
+    system: GRADE_SYSTEM,
+    user: [
+      `课程：${input.title}`,
+      input.unit ? `范围：第 ${input.unit.ordinal + 1} 讲《${input.unit.title}》` : '范围：整门课',
+      '题目与学生作答：',
+      ...input.questions.map((question, index) => [
+        `第 ${index + 1} 题：${question.prompt}`,
+        `原文：${question.source}`,
+        `学生答：${answerMap.get(question.id) ?? '（未作答）'}`,
+      ].join('\n')),
+      '材料：',
+      input.material,
+      '请判题并写具体反馈。',
+    ].join('\n\n'),
+  }
+}
+
+export function buildStudyTeachbackPrompt(input: {
+  title: string
+  material: string
+  unit: StudyUnit | null
+  answer: string
+}): { system: string; user: string } {
+  return {
+    system: TEACHBACK_SYSTEM,
+    user: [
+      `课程：${input.title}`,
+      input.unit ? `范围：第 ${input.unit.ordinal + 1} 讲《${input.unit.title}》` : '范围：整门课',
+      '学生用自己的话复述：',
+      input.answer,
+      '材料：',
+      input.material,
+      '请按原文找具体缺口。',
+    ].join('\n\n'),
+  }
 }
 
 export function mergeOpening(opening: string, units: StudyUnit[]): string {
